@@ -55,7 +55,7 @@ app.index_string = '''
         {%favicon%}
         {%css%}
         <style>
-            h1, h2, h3, h4 {
+            h1, h2, h3, h4, h5, h6 {
                 color: white;
             }
         </style>
@@ -144,7 +144,7 @@ kpi_ids = {
 kpi_cards = [
     dbc.Col(dbc.Card([
         dbc.CardHeader(kpi),
-        dbc.CardBody(html.H4(f"0", id=kpi_ids[kpi], className="card-title"))
+        dbc.CardBody(html.H4(f"0", id=kpi_ids.get(kpi, kpi.replace(' ', '_')), className="card-title"))
     ], color="light")) for kpi in df_kpis["KPI"]
 ]
 
