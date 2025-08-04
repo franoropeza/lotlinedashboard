@@ -1,0 +1,24 @@
+=============================  29.log
+ Ejecución: mar 29/07/2025 10:01:37,76      29.log
+=============================  29.log
+Traceback (most recent call last):
+  File "C:\Users\foropeza\OneDrive - LOTERIA DE SALTA SA\Documentos\Reporte Billeteras\generar_reporte_incremental.py", line 14, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
+---- Fin (mar 29/07/2025 10:01:37,94) ----  29.log
+=============================  29.log
+ Ejecución: mar 29/07/2025 10:44:30,15      29.log
+=============================  29.log
+Traceback (most recent call last):
+  File "C:\Users\foropeza\OneDrive - LOTERIA DE SALTA SA\Documentos\Reporte Billeteras\generar_reporte_incremental.py", line 14, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
+---- Fin (mar 29/07/2025 10:44:30,22) ----  29.log
+=============================  29.log
+ Ejecución: mar 29/07/2025 11:44:19,56      29.log
+=============================  29.log
+Traceback (most recent call last):
+  File "C:\Users\foropeza\OneDrive - LOTERIA DE SALTA SA\Documentos\Reporte Billeteras\generar_reporte_incremental.py", line 14, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
+---- Fin (mar 29/07/2025 11:44:19,65) ----  29.log
