@@ -56,7 +56,7 @@ app.index_string = '''
         {%favicon%}
         {%css%}
         <style>
-            h1, h2, h3, h4, h5, h6 {
+            h1, h2, h3, h4 {
                 color: white;
             }
         </style>
@@ -130,7 +130,7 @@ from dash import dash_table
 # Definir los IDs para los KPIs
 kpi_ids = {
     "Total Nuevos Usuarios desde MODO": "kpi_nuevos_modo",
-    "Total Bets por juego y mes": "grafico_totales_juegos_mes",
+    "Total apuestas por juego y mes": "grafico_totales_juegos_mes",
     "Promedio depósito $": "kpi_promedio_deposito",
     "Usuarios únicos (cualquier mov.)": "kpi_usuarios_total",
     "Usuarios únicos apostadores": "kpi_usuarios_apostadores",
