@@ -43,6 +43,7 @@ import os
 # Inicializar app
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 app.title = "Dashboard Lotería de Salta"
+server = app.server
 
 # Estilos CSS personalizados para el fondo y padding
 app._assets_folder = os.path.join(os.path.dirname(__file__), 'assets')
@@ -345,5 +346,3 @@ def actualizar_dashboard(start, end):
     )
 
 
-if __name__ == '__main__':
-    app.run(debug=False)
