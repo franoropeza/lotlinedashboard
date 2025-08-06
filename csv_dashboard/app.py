@@ -106,6 +106,8 @@ df_mov_modo = cargar_csv_con_fechas("movimientos_modo.csv", "Fecha", dayfirst=Tr
 
 df_kpis = pd.read_csv("kpis.csv")
 df_jugadores = pd.read_csv("jugadores_unicos_por_juego.csv")
+df_kpis_bonif = pd.read_csv("kpis_bonificaciones.csv")
+df_top_bonif = pd.read_csv("top_usuarios_bonificados.csv")
 df_nuevos = cargar_csv_con_fechas("nuevos_modo.csv", "Fecha_Alta", dayfirst=True)
 df_reactivados = cargar_csv_con_fechas("reactivados_modo.csv", "Fecha", dayfirst=True)
 df_total_juegos_mes = cargar_csv_con_fechas("total_juegos_mes.csv", "AñoMes", dayfirst=True)
@@ -139,15 +141,20 @@ kpi_ids = {
     "Recargas - Retail": "kpi_recargas_retail",
     "Monto MODO $": "kpi_monto_modo",
     "Monto Retail $": "kpi_monto_retail",
+    "Usuarios bonificados": "kpi_usuarios_bonificados",
+    "Monto total bonificado $": "kpi_monto_bonificado",
 }
 
 # Construir el layout de los KPIs dinámicamente
+df_kpis_total = pd.concat([df_kpis, df_kpis_bonif], ignore_index=True)
+
 kpi_cards = [
     dbc.Col(dbc.Card([
         dbc.CardHeader(kpi),
         dbc.CardBody(html.H4(f"0", id=kpi_ids.get(kpi, kpi.replace(' ', '_')), className="card-title"))
-    ], color="light")) for kpi in df_kpis["KPI"]
+    ], color="light")) for kpi in df_kpis_total["KPI"]
 ]
+
 
 # Tab: KPIs + Gráficos
 tab_main = dbc.Container([
@@ -252,7 +259,15 @@ tab_tablas = dbc.Container([
     ),
 
     html.H4("Top 10 usuarios por juego", className="mt-5"),
-    dcc.Tabs(top10_tabs)
+    dcc.Tabs(top10_tabs),
+
+    html.H4("Top usuarios que apostaron luego de ser bonificados", className="mt-5"),
+    dash_table.DataTable(
+    columns=[{"name": c, "id": c} for c in df_top_bonif.columns],
+    data=df_top_bonif.to_dict("records"),
+    page_size=10, style_table={"overflowX": "auto"},
+),
+
 ], fluid=True)
 
 # Layout final con tabs
@@ -285,8 +300,11 @@ app.layout = html.Div(
     Output("grafico_prom", "figure"),
     Output("grafico_totales_juegos_mes", "figure"),
     Output("grafico_comp", "figure"),
+    Output("kpi_usuarios_bonificados", "children"),
+    Output("kpi_monto_bonificado", "children"),
     Input("filtro_fecha", "start_date"),
     Input("filtro_fecha", "end_date")
+    
 )
 def actualizar_dashboard(start, end):
     # Filtrar dataframes por rango de fecha
@@ -327,6 +345,16 @@ def actualizar_dashboard(start, end):
                       barmode="group", title="Antes/Después MODO",
                       labels={"value": "$", "variable": "Tipo"})
     
+    # Leer KPIs de bonificaciones
+    try:
+        kpi_bonif = pd.read_csv("kpis_bonificaciones.csv").set_index("KPI")["Valor"]
+        bonif_usuarios = f"{int(kpi_bonif.get('Usuarios bonificados', 0)):,}"
+        bonif_monto = f"{kpi_bonif.get('Monto total bonificado $', 0):,.2f}"
+    except:
+        bonif_usuarios = "0"
+        bonif_monto = "0.00"
+
+
     # Devolver los valores actualizados
     return (
         f"{promedio_deposito:,.2f}",
@@ -337,6 +365,8 @@ def actualizar_dashboard(start, end):
         f"{recargas_retail:,.0f}",
         f"{monto_modo:,.2f}",
         f"{monto_retail:,.2f}",
+        bonif_usuarios,
+        bonif_monto,
         fig_monto,
         fig_cant,
         fig_modo,

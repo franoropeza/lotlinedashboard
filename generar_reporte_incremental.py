@@ -685,4 +685,70 @@ try:
 except Exception as e:
     print(f"⚠️ Error al exportar reportes adicionales: {e}")
 
+# ========= BONIFICACIONES POR DEPÓSITO =========
+try:
+    print("🔎 Analizando bonificaciones por depósito...")
+
+    # 1. Filtrar movimientos que contienen "bonific" y excluir AFIP / RG
+    mask_bonif = (
+        data["Tipo Mov."].str.lower().str.contains("bonific", na=False) &
+        ~data["Tipo Mov."].str.lower().str.contains("afip|rg 5228", na=False)
+    )
+    bonificaciones = data.loc[mask_bonif].copy()
+
+    if bonificaciones.empty:
+        print("⚠️ No se encontraron bonificaciones válidas.")
+    else:
+        # 2. Normalizar columnas clave
+        bonificaciones["Fecha"] = pd.to_datetime(bonificaciones["Fecha"], dayfirst=True, errors="coerce")
+        bonificaciones["Importe"] = pd.to_numeric(
+            bonificaciones["Importe"].astype(str)
+            .str.replace(".", "", regex=False)
+            .str.replace(",", ".", regex=False),
+            errors="coerce"
+        )
+
+        # 3. Crear CSV de bonificaciones base
+        bonificaciones_csv = bonificaciones[["Documento", "Fecha", "Importe"]].copy()
+        bonificaciones_csv.to_csv(csv_dir / "bonificaciones.csv", index=False)
+
+        # 4. Buscar usuarios que apostaron DESPUÉS de recibir la bonificación
+        apuestas_bonif = apuestas[["Documento", "Fecha", "Importe"]].copy()
+        bonif_min_fecha = (
+            bonificaciones.groupby("Documento")["Fecha"]
+                          .min()
+                          .reset_index(name="Fecha_Bonif")
+        )
+        apuestas_post = apuestas_bonif.merge(bonif_min_fecha, on="Documento", how="inner")
+        apuestas_post = apuestas_post[apuestas_post["Fecha"] > apuestas_post["Fecha_Bonif"]]
+
+        if not apuestas_post.empty:
+            top_post_bonif = (
+                apuestas_post.groupby("Documento")
+                             .agg(Total_Apuestas_PostBonif=("Importe", "count"),
+                                  Monto_Apostado_PostBonif=("Importe", "sum"))
+                             .reset_index()
+                             .sort_values("Monto_Apostado_PostBonif", ascending=False)
+            )
+            top_post_bonif.to_csv(csv_dir / "top_usuarios_bonificados.csv", index=False)
+        else:
+            pd.DataFrame(columns=["Documento", "Total_Apuestas_PostBonif", "Monto_Apostado_PostBonif"]).to_csv(
+                csv_dir / "top_usuarios_bonificados.csv", index=False
+            )
+
+        # 5. Exportar KPIs de bonificaciones
+        total_bonificados = bonificaciones["Documento"].nunique()
+        monto_total_bonificado = bonificaciones["Importe"].sum()
+
+        kpi_df = pd.DataFrame({
+            "KPI": ["Usuarios bonificados", "Monto total bonificado $"],
+            "Valor": [total_bonificados, monto_total_bonificado]
+        })
+        kpi_df.to_csv(csv_dir / "kpis_bonificaciones.csv", index=False)
+
+        print("✅ CSV de bonificaciones generado.")
+except Exception as e:
+    print(f"⚠️ Error procesando bonificaciones: {e}")
+
+
 print("🏁  Proceso incremental terminado.")
