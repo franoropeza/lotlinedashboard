@@ -1,6 +1,6 @@
 import pandas as pd
 import plotly.express as px
-from dash import Dash, html, dcc, Input, Output
+from dash import Dash, html, dcc, Input, Output, dash_table
 import dash_bootstrap_components as dbc
 import os
 
@@ -34,8 +34,7 @@ app.index_string = '''
 </html>
 '''
 
-FECHA_MODO_FULL = pd.Timestamp("2025-07-07")
-
+# ================== CARGA DE DATASETS ==================
 def cargar_csv_con_fechas(filename, date_col, dayfirst=False):
     if not os.path.exists(filename):
         print(f"⚠️ Archivo no encontrado: {filename}")
@@ -49,7 +48,7 @@ def cargar_csv_con_fechas(filename, date_col, dayfirst=False):
         print(f"⚠️ Error al cargar {filename}: {e}")
         return pd.DataFrame()
 
-# ================== CARGA DE DATASETS ==================
+# Archivos de MODO y recargas
 df_modo = cargar_csv_con_fechas("modo_diario.csv", "Fecha_Dia")
 df_monto = cargar_csv_con_fechas("recargas_monto.csv", "Fecha_Dia")
 df_cant = cargar_csv_con_fechas("recargas_cant.csv", "Fecha_Dia")
@@ -57,14 +56,17 @@ df_prom = cargar_csv_con_fechas("deposito_promedio.csv", "Fecha_Dia")
 df_comp = pd.read_csv("comparativa_modo.csv")
 df_mov_modo = cargar_csv_con_fechas("movimientos_modo.csv", "Fecha", dayfirst=True)
 
+# Archivos de análisis general
 df_kpis = pd.read_csv("kpis.csv")
 df_jugadores = pd.read_csv("jugadores_unicos_por_juego.csv")
-df_kpis_bonif = pd.read_csv("kpis_bonificaciones.csv")
-df_top_bonif = pd.read_csv("top_usuarios_bonificados.csv")
 df_nuevos = cargar_csv_con_fechas("nuevos_modo.csv", "Fecha_Alta", dayfirst=True)
 df_reactivados = cargar_csv_con_fechas("reactivados_modo.csv", "Fecha", dayfirst=True)
 df_total_juegos_mes = cargar_csv_con_fechas("total_juegos_mes.csv", "AñoMes", dayfirst=True)
 df_total_usuarios_nuevos_modo = pd.read_csv("total_usuarios_nuevos_modo.csv")
+
+# Archivos de bonificaciones
+df_kpis_bonif = cargar_csv_con_fechas("kpis_bonificaciones.csv", "Fecha", dayfirst=True)
+df_top_bonif = pd.read_csv("top_usuarios_bonificados.csv")
 
 # KPI CARDS
 kpi_ids = {
@@ -82,7 +84,6 @@ kpi_ids = {
     "Monto total bonificado $": "kpi_monto_bonificado",
 }
 
-# Combinar KPIs en una sola lista
 kpi_labels = pd.concat([df_kpis, df_kpis_bonif])['KPI']
 kpi_labels = kpi_labels.dropna().astype(str)
 
@@ -94,17 +95,23 @@ kpi_cards = [
 ]
 
 # ================== TABS ==================
-from dash import dash_table
 
-fecha_min = df_monto["Fecha_Dia"].min()
-fecha_max = df_monto["Fecha_Dia"].max()
-
-# Placeholder para tab_main y tab_tablas
-empty_tab = dbc.Container([
-    html.H4("Contenido próximamente disponible."),
+tab_main = dbc.Container([
+    html.H2("📊 Dashboard General", className="my-4"),
+    dbc.Row(kpi_cards, className="mb-4"),
 ])
 
-# NUEVO TAB: BONIFICACIONES
+tab_tablas = dbc.Container([
+    html.H2("📋 Tablas de usuarios únicos", className="my-4"),
+    dash_table.DataTable(
+        columns=[{"name": c, "id": c} for c in df_jugadores.columns],
+        data=df_jugadores.to_dict("records"),
+        page_size=10,
+        style_table={"overflowX": "auto"},
+        style_cell={"textAlign": "left"}
+    )
+])
+
 bonificaciones_tab = dbc.Container([
     html.H2("🎁 Bonificaciones", className="my-4"),
     dcc.Graph(
@@ -138,22 +145,21 @@ bonificaciones_tab = dbc.Container([
     )
 ], fluid=True)
 
-# LAYOUT FINAL
+# ================== LAYOUT ==================
+
 app.layout = html.Div(
     style={'padding': '150px'},
     children=[
         html.Img(src='/assets/logo.png', style={'display': 'block', 'margin-left': 'auto', 'margin-right': 'auto', 'width': '150px', 'height': '150px'}),
         dbc.Container([
             dcc.Tabs([
-                dcc.Tab(label="📊 Dashboard", children=[empty_tab]),
-                dcc.Tab(label="📋 Tablas de usuarios", children=[empty_tab]),
+                dcc.Tab(label="📊 Dashboard", children=[tab_main]),
+                dcc.Tab(label="📋 Tablas de usuarios", children=[tab_tablas]),
                 dcc.Tab(label="🎁 Bonificaciones", children=[bonificaciones_tab]),
             ])
         ], fluid=True)
     ]
 )
-
-# [callbacks omitidos por brevedad]
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
