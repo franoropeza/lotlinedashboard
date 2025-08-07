@@ -151,7 +151,7 @@ df_kpis_total = pd.concat([df_kpis, df_kpis_bonif], ignore_index=True)
 kpi_cards = [
     dbc.Col(dbc.Card([
         dbc.CardHeader(kpi),
-        dbc.CardBody(html.H4(f"0", id=kpi_ids.get(kpi, kpi.replace(' ', '_')), className="card-title"))
+        dbc.CardBody(html.H4(f"0", id=kpi_ids.get(kpi, str(kpi).replace(' ', '_')), className="card-title"))
     ], color="light")) for kpi in df_kpis_total["KPI"]
 ]
 
