@@ -1,11 +1,11 @@
-Documento,Bets,Gastado,DNI,Usuario,Correo
-20248139,30,60000.0,20248139,"Soria, Alfredo",soralfredo@yahoo.com.ar
-32242127,30,60000.0,32242127,"Tejerina , Cesar Rodrigo ",rodrigotejerina11@yahoo.com.ar
-32548656,29,58000.0,32548656,,ouiouicipriano@gmail.com
-33236013,20,40000.0,33236013,,nicoisola17@gmail.com
-24875686,18,36000.0,24875686,,berto15jeje@gmail.com
-29720249,18,36000.0,29720249,"CASIMIRO, MARIA DEL ",casimaryvalle@yahoo.com.ar
-39929837,14,28000.0,39929837,,nicoaleflores97@gmail.com
-39004399,13,26000.0,39004399,,santiagomoyaalvarez@gmail.com
-23255547,13,26000.0,23255547,"Gonzalez , Emelda ",emade19@hotmail.com
-27681571,12,24000.0,27681571,"Ritzer Lacroix, Alejandro",aleritzer@gmail.com
+Documento,Bets,Gastado,Válida,Fecha_Alta,Usuario,Correo
+20248139,30,60000.0,VALIDA,2021-12-13,"Soria, Alfredo",soralfredo@yahoo.com.ar
+32242127,30,60000.0,VALIDA,2021-09-01,"Tejerina , Cesar Rodrigo ",rodrigotejerina11@yahoo.com.ar
+32548656,29,58000.0,VALIDA,2025-05-20,,ouiouicipriano@gmail.com
+33236013,21,42000.0,VALIDA,2025-04-19,,nicoisola17@gmail.com
+24875686,20,40000.0,VALIDA,2025-05-22,,berto15jeje@gmail.com
+29720249,18,36000.0,VALIDA,2023-08-29,"CASIMIRO, MARIA DEL ",casimaryvalle@yahoo.com.ar
+39929837,14,28000.0,VALIDA,2025-06-08,,nicoaleflores97@gmail.com
+23255547,13,26000.0,VALIDA,2021-08-31,"Gonzalez , Emelda ",emade19@hotmail.com
+39004399,13,26000.0,VALIDA,2025-07-30,,santiagomoyaalvarez@gmail.com
+27681571,12,24000.0,VALIDA,2023-07-06,"Ritzer Lacroix, Alejandro",aleritzer@gmail.com
