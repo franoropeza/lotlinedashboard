@@ -13,7 +13,6 @@ from datetime import datetime, timedelta
 import warnings, shutil, unicodedata, os, time
 import pandas as pd
 import numpy as np
-import xlwings as xw  # Importamos la librería xlwings
 
 warnings.filterwarnings("ignore", message="Workbook contains no default style")
 
@@ -593,47 +592,196 @@ total_juegos_mes.to_csv(csv_dir / "total_juegos_mes.csv", index=False)
 print("✅ CSV generado: total_juegos_mes.csv")
 
 
-# ========= Exportar a la plantilla de Excel con xlwings =========
-try:
-    if not TEMPLATE_PATH.exists():
-        print("⚠️ No se encontró el archivo de plantilla. No se puede generar el reporte con macros.")
-    else:
-        print(f"🔄 Actualizando el reporte de Excel usando la plantilla: {TEMPLATE_PATH.name}…")
-        # Abre la plantilla con xlwings (visible=False para que no se muestre)
-        wb = xw.Book(TEMPLATE_PATH.name, visible=False)
-        
-        # Escribe los dataframes procesados en las hojas correspondientes
-        # Asegúrate de que los nombres de las hojas y las celdas de inicio coincidan
-        wb.sheets["Base_Movimientos"].range("A1").options(index=False).value = data
-        wb.sheets["Resumen_Datos"].range("A1").options(index=False).value = resumen_kpis
-        wb.sheets["Cliente_Mes"].range("A1").options(index=False).value = cliente_mes
-        wb.sheets["Top_Games_Total"].range("A1").options(index=False).value = top_games_total
-        wb.sheets["Top_Games_Mes"].range("A1").options(index=False).value = top_games_mes
-        wb.sheets["Recargas_Diario"].range("A1").options(index=False).value = recargas_diario_canal
-        wb.sheets["MODO_Diario"].range("A1").options(index=False).value = modo_diario
-        wb.sheets["Retiros_Diario"].range("A1").options(index=False).value = retiros_diario
-        wb.sheets["Ganadores"].range("A1").options(index=False).value = premios_resumen
-        wb.sheets["Juego_Dia_Detalle"].range("A1").options(index=False).value = juego_dia_detalle
-        wb.sheets["Dia_Totales"].range("A1").options(index=False).value = dia_totales
-        wb.sheets["Retencion_MODO"].range("A1").options(index=False).value = retencion_modo
-        wb.sheets["Usuarios_Mes"].range("A1").options(index=False).value = usuarios_mes
-        wb.sheets["Usuarios_Hitos"].range("A1").options(index=False).value = usuarios_hitos
-        wb.sheets["Comparativa_MODO"].range("A1").options(index=False).value = comparativa_modo
+# ========= Exportar: archivo analítico con gráficos (openpyxl) =========
+with pd.ExcelWriter(SALIDA_ANALITICO, engine="openpyxl", mode="w") as writer:
+    resumen_kpis.to_excel(writer,              sheet_name="Resumen_Datos",     index=False)
+    cliente_mes.to_excel(writer,               sheet_name="Cliente_Mes",       index=False)
+    top_games_total.to_excel(writer,           sheet_name="Top_Games_Total",   index=False)
+    top_games_mes.to_excel(writer,             sheet_name="Top_Games_Mes",     index=False)
 
-        if top10_contactos is not None and not top10_contactos.empty:
-             wb.sheets["Top10_Contactos"].range("A1").options(index=False).value = top10_contactos
+    for sheet, df in game_summaries.items():
+        df.to_excel(writer, sheet_name=sheet, index=False)
+
+    recargas_diario_canal.to_excel(writer,     sheet_name="Recargas_Diario",   index=False)
+    recargas_dia_monto.to_excel(writer,        sheet_name="Recargas_Dia_Monto",index=False)
+    recargas_dia_cant.to_excel(writer,         sheet_name="Recargas_Dia_Cant", index=False)
+    modo_diario.to_excel(writer,               sheet_name="MODO_Diario",       index=False)
+    retiros_diario.to_excel(writer,            sheet_name="Retiros_Diario",    index=False)
+    premios_resumen.to_excel(writer,           sheet_name="Ganadores",         index=False)
+    juego_dia_detalle.to_excel(writer,         sheet_name="Juego_Dia_Detalle", index=False)
+    dia_totales.to_excel(writer,               sheet_name="Dia_Totales",       index=False)
+    retencion_modo.to_excel(writer,            sheet_name="Retencion_MODO",    index=False)
+    usuarios_mes.to_excel(writer,              sheet_name="Usuarios_Mes",      index=False)
+    usuarios_hitos.to_excel(writer,            sheet_name="Usuarios_Hitos",    index=False)
+    comparativa_modo.to_excel(writer,          sheet_name="Comparativa_MODO",  index=False)
+
+    if top10_contactos is not None and not top10_contactos.empty:
+        top10_contactos.to_excel(writer,      sheet_name="Top10_Contactos",    index=False)
+    
+    if usuarios_nuevos_modo is not None and not usuarios_nuevos_modo.empty:
+        usuarios_nuevos_modo.to_excel(writer, sheet_name="Nuevos_MODO", index=False)
+
+    if usuarios_reactivados_modo is not None and not usuarios_reactivados_modo.empty:
+        usuarios_reactivados_modo.to_excel(writer, sheet_name="Reactivados_MODO", index=False)
         
-        # Vuelve a calcular las tablas dinámicas y macros si es necesario (con xlwings)
-        wb.app.calculate()
-        
-        # Guarda el archivo con un nuevo nombre
-        wb.save(SALIDA_XLWINGS)
-        wb.close()
-        print(f"✅ Reporte de Excel actualizado y guardado como: {SALIDA_XLWINGS.name}")
-        
-except Exception as e:
-    print(f"⚠️ Error al generar el reporte de Excel con xlwings: {e}")
-    print("Por favor, asegúrate de que el archivo de plantilla no esté abierto.")
+    for juego, df in top10_por_juego_con_datos.items():
+        if not df.empty:
+            df.to_excel(writer, sheet_name=f"Top10_{juego}", index=False)
+
+# ----- Hoja RESUMEN + gráficos
+from openpyxl import load_workbook
+from openpyxl.chart import LineChart, BarChart, Reference
+
+wb = load_workbook(SALIDA_ANALITICO)
+if "Resumen" in wb.sheetnames:
+    wb.remove(wb["Resumen"])
+ws = wb.create_sheet("Resumen", 0)
+
+ws["A1"]  = "KPIs principales"
+ws["A3"]  = "Promedio depósito $";            ws["B3"]  = promedio_deposito
+ws["A4"]  = "Usuarios únicos (mov.)";         ws["B4"]  = cant_unicos_total
+ws["A5"]  = "Usuarios únicos apostadores";    ws["B5"]  = cant_unicos_apuestan
+ws["A6"]  = "Usuarios únicos que recargaron"; ws["B6"]  = cant_recargas_unicas
+ws["A8"]  = "Recargas MODO";                  ws["B8"]  = recargas_modo
+ws["A9"]  = "Recargas Retail";                ws["B9"]  = recargas_retail
+ws["A11"] = "Monto MODO $";                   ws["B11"] = monto_modo
+ws["A12"] = "Monto Retail $";                 ws["B12"] = monto_retail
+for cell in ["B3","B11","B12"]:
+    ws[cell].number_format = '#,##0.00'
+for cell in ["B4","B5","B6","B8","B9"]:
+    ws[cell].number_format = '#,##0'
+
+# $ por día por canal
+sheet_monto = wb["Recargas_Dia_Monto"]
+max_row = sheet_monto.max_row
+max_col = sheet_monto.max_column
+line1 = LineChart()
+line1.title = "$ por día por canal"
+line1.y_axis.title = "$"
+line1.x_axis.title = "Fecha"
+data_ref = Reference(sheet_monto, min_col=2, min_row=1, max_col=max_col, max_row=max_row)
+cats_ref = Reference(sheet_monto, min_col=1, min_row=2, max_row=max_row)
+line1.add_data(data_ref, titles_from_data=True)
+line1.set_categories(cats_ref)
+line1.height = 11
+line1.width = 24
+ws.add_chart(line1, "D2")
+
+# Cantidad de recargas por día por canal
+sheet_cnt = wb["Recargas_Dia_Cant"]
+max_row2 = sheet_cnt.max_row
+max_col2 = sheet_cnt.max_column
+bar1 = BarChart()
+bar1.type = "col"
+bar1.title = "Recargas por día por canal"
+bar1.y_axis.title = "Recargas"
+bar1.x_axis.title = "Fecha"
+data_ref2 = Reference(sheet_cnt, min_col=2, min_row=1, max_col=max_col2, max_row=max_row2)
+cats_ref2 = Reference(sheet_cnt, min_col=1, min_row=2, max_row=max_row2)
+bar1.add_data(data_ref2, titles_from_data=True)
+bar1.set_categories(cats_ref2)
+bar1.height = 11
+bar1.width = 24
+ws.add_chart(bar1, "D18")
+
+# Apuestas por juego (total)
+sheet_games = wb["Top_Games_Total"]
+max_row3 = sheet_games.max_row
+bar2 = BarChart()
+bar2.title = "Apuestas por juego (total)"
+bar2.y_axis.title = "Bets"
+cats3 = Reference(sheet_games, min_col=1, min_row=2, max_row=max_row3)
+data3 = Reference(sheet_games, min_col=2, min_row=1, max_row=max_row3)
+bar2.add_data(data3, titles_from_data=True)
+bar2.set_categories(cats3)
+bar2.height = 11
+bar2.width = 24
+ws.add_chart(bar2, "D34")
+
+# Apuestas por día de semana
+sheet_dias = wb["Dia_Totales"]
+max_row4 = sheet_dias.max_row
+bar3 = BarChart()
+bar3.title = "Apuestas por día de semana"
+bar3.y_axis.title = "Bets"
+cats4 = Reference(sheet_dias, min_col=1, min_row=2, max_row=max_row4)
+data4 = Reference(sheet_dias, min_col=2, min_row=1, max_row=max_row4)
+bar3.add_data(data4, titles_from_data=True)
+bar3.set_categories(cats4)
+bar3.height = 11
+bar3.width = 24
+ws.add_chart(bar3, "D50")
+
+# Before vs After 07/07
+sheet_cmp = wb["Comparativa_MODO"]
+bar4 = BarChart()
+bar4.title = "Before vs After 07/07/2025"
+bar4.y_axis.title = "$"
+cats5 = Reference(sheet_cmp, min_col=1, min_row=2, max_row=3)
+data5 = Reference(sheet_cmp, min_col=2, min_row=1, max_col=3, max_row=3)
+bar4.add_data(data5, titles_from_data=True)
+bar4.set_categories(cats5)
+bar4.height = 11
+bar4.width = 24
+ws.add_chart(bar4, "D66")
+
+
+
+# Uso por juego por día con filtro de fechas (SUMIFS)
+sheet_det = wb["Juego_Dia_Detalle"]
+min_date = sheet_det["A2"].value
+max_date = sheet_det[f"A{sheet_det.max_row}"].value
+ws["A86"] = "Fecha inicio"; ws["B86"] = min_date
+ws["A87"] = "Fecha fin";    ws["B87"] = max_date
+for c in ("B86","B87"): ws[c].number_format = "yyyy-mm-dd"
+
+row = 90
+d = pd.to_datetime(min_date).date()
+end = pd.to_datetime(max_date).date()
+while d <= end:
+    ws[f"A{row}"] = d
+    ws[f"A{row}"].number_format = "yyyy-mm-dd"
+    row += 1
+    d += timedelta(days=1)
+last_row_dates = row - 1
+
+max_row_games = sheet_games.max_row
+topN = min(6, max_row_games - 1)
+games = [sheet_games[f"A{r}"].value for r in range(2, 2 + topN)]
+ws["B89"] = "Bets (por juego y día)"
+for idx, g in enumerate(games, start=2):
+    ws.cell(row=89, column=idx).value = g
+
+det_rows = sheet_det.max_row
+for r in range(90, last_row_dates + 1):
+    date_cell = f"A{r}"
+    for i, g in enumerate(games, start=2):
+        ws.cell(row=r, column=i).value = (
+            f'=IF(AND({date_cell}>=B86,{date_cell}<=B87),'
+            f'SUMIFS(Juego_Dia_Detalle!$C$2:$C${det_rows},'
+            f'Juego_Dia_Detalle!$B$2:$B${det_rows},"{g}",'
+            f'Juego_Dia_Detalle!$A$2:$A${det_rows},{date_cell}),'
+            f'NA())'
+        )
+
+from openpyxl.chart import LineChart
+chart = LineChart()
+chart.title = "Uso por juego por día (filtrado)"
+chart.y_axis.title = "Bets"
+chart.x_axis.title = "Fecha"
+min_col = 2
+max_col = 1 + len(games)
+data_ref = Reference(ws, min_col=min_col, min_row=89, max_col=max_col, max_row=last_row_dates)
+cats_ref = Reference(ws, min_col=1, min_row=90, max_row=last_row_dates)
+chart.add_data(data_ref, titles_from_data=True)
+chart.set_categories(cats_ref)
+chart.height = 15
+chart.width  = 28
+ws.add_chart(chart, "D82")
+
+# Guardar el Excel
+wb.save(SALIDA_ANALITICO)
+print(f"✅ Archivo guardado: {SALIDA_ANALITICO}")
 
 # ========= Exportar hojas clave como CSV para dashboard HTML =========
 def export_csv(sheet_name, filename):
