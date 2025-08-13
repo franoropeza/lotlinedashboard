@@ -73,7 +73,7 @@ app.index_string = '''
 '''
 
 
-# Fecha de hito para el filtro de nuevos usuarios
+# Fecha de hito para el filtro de nuevos usuarios y cálculo de recaudación
 FECHA_MODO_FULL = pd.Timestamp("2025-07-07")
 
 # ==================== Funciones de carga de datos ====================
@@ -111,6 +111,8 @@ df_reactivados = cargar_csv_con_fechas("reactivados_modo.csv", "Fecha", dayfirst
 df_total_juegos_mes = cargar_csv_con_fechas("total_juegos_mes.csv", "AñoMes", dayfirst=True)
 df_total_usuarios_nuevos_modo = pd.read_csv("total_usuarios_nuevos_modo.csv")
 
+# Cargar datos de apuestas para calcular recaudación (necesario crear este CSV desde el script principal)
+df_apuestas = cargar_csv_con_fechas("apuestas_diario.csv", "Fecha_Dia") if os.path.exists("apuestas_diario.csv") else pd.DataFrame()
 
 # Llenar DataFrames vacíos para evitar errores de layout
 if df_modo.empty or df_monto.empty:
@@ -119,6 +121,10 @@ if df_modo.empty or df_monto.empty:
     df_cant = pd.DataFrame({"Fecha_Dia": [pd.Timestamp.now()], "MODO": [0], "Retail": [0]})
     df_modo = pd.DataFrame({"Fecha_Dia": [pd.Timestamp.now()], "Usuarios_Unicos": [0]})
     df_prom = pd.DataFrame({"Fecha_Dia": [pd.Timestamp.now()], "MODO": [0], "Retail": [0]})
+
+if df_apuestas.empty:
+    # Crear DataFrame vacío para apuestas si no existe
+    df_apuestas = pd.DataFrame({"Fecha_Dia": [pd.Timestamp.now()], "Recaudacion": [0]})
 
 # Filtros disponibles
 fecha_min = df_monto["Fecha_Dia"].min()
@@ -167,16 +173,20 @@ tab_main = dbc.Container([
     ]),
     dbc.Row(kpi_cards, className="mb-4"),
     
-    # Nuevos KPIs y gráficos
-    html.H2("Resumen de Usuarios", className="mt-5"),
+    # Nueva tarjeta de recaudación por período
+    html.H2("Análisis de Recaudación", className="mt-5"),
     dbc.Row([
+        dbc.Col(dbc.Card([
+            dbc.CardHeader(html.H5("Recaudación Período Seleccionado", className="text-center")),
+            dbc.CardBody(html.H4("$0", id="kpi_recaudacion_periodo", className="card-title text-center"))
+        ], color="warning", outline=True), width=4),
         dbc.Col(dbc.Card([
             dbc.CardHeader(html.H5("Nuevos Usuarios desde MODO", className="text-center")),
             dbc.CardBody(html.H4(
                 f"{df_total_usuarios_nuevos_modo['Valor'].iloc[0]:,.0f}", 
                 id="kpi_nuevos_modo", className="card-title text-center"
             ))
-        ], color="success", outline=True), width=6),
+        ], color="success", outline=True), width=4),
         dbc.Col(dbc.Card([
             dbc.CardHeader(html.H5("Total Bets por juego y mes", className="text-center")),
             dbc.CardBody(dcc.Graph(
@@ -190,20 +200,13 @@ tab_main = dbc.Container([
                     labels={"Total_Bets": "Total de Apuestas", "AñoMes": "Año-Mes"}
                 )
             ))
-        ], color="info", outline=True), width=6)
+        ], color="info", outline=True), width=4)
     ], className="mb-4"),
-
 
     dbc.Row([dbc.Col(dcc.Graph(id="grafico_monto"))]),
     dbc.Row([dbc.Col(dcc.Graph(id="grafico_cant"))]),
     dbc.Row([dbc.Col(dcc.Graph(id="grafico_modo"))]),
     dbc.Row([dbc.Col(dcc.Graph(id="grafico_prom"))]),
-    dbc.Row([dbc.Col(dcc.Graph(
-        id="grafico_comp",
-        figure=px.bar(df_comp, x="Periodo", y=["Depositos_$", "Recaudacion_$"],
-                      barmode="group", title="Antes/Después MODO",
-                      labels={"value": "$", "variable": "Tipo"})
-    ))])
 ], fluid=True)
 
 # Tab: Tablas interactivas
@@ -269,7 +272,7 @@ app.layout = html.Div(
     ]
 )
 
-# Callback para actualizar todos los gráficos y KPIs
+# Callback para actualizar todos los gráficos y KPIs (SIN el gráfico comparativa)
 @app.callback(
     Output("kpi_promedio_deposito", "children"),
     Output("kpi_usuarios_total", "children"),
@@ -279,12 +282,12 @@ app.layout = html.Div(
     Output("kpi_recargas_retail", "children"),
     Output("kpi_monto_modo", "children"),
     Output("kpi_monto_retail", "children"),
+    Output("kpi_recaudacion_periodo", "children"),  # Nueva KPI de recaudación
     Output("grafico_monto", "figure"),
     Output("grafico_cant", "figure"),
     Output("grafico_modo", "figure"),
     Output("grafico_prom", "figure"),
     Output("grafico_totales_juegos_mes", "figure"),
-    Output("grafico_comp", "figure"),
     Input("filtro_fecha", "start_date"),
     Input("filtro_fecha", "end_date")
 )
@@ -295,6 +298,7 @@ def actualizar_dashboard(start, end):
     df_modo_filtrado = df_modo[(df_modo["Fecha_Dia"] >= start) & (df_modo["Fecha_Dia"] <= end)]
     df_prom_filtrado = df_prom[(df_prom["Fecha_Dia"] >= start) & (df_prom["Fecha_Dia"] <= end)]
     df_total_juegos_mes_filtrado = df_total_juegos_mes[(df_total_juegos_mes["AñoMes"] >= start[:7]) & (df_total_juegos_mes["AñoMes"] <= end[:7])]
+    df_apuestas_filtrado = df_apuestas[(df_apuestas["Fecha_Dia"] >= start) & (df_apuestas["Fecha_Dia"] <= end)]
     
     # Actualizar KPIs
     promedio_deposito = df_prom_filtrado["MODO"].mean() if not df_prom_filtrado.empty else 0
@@ -305,8 +309,11 @@ def actualizar_dashboard(start, end):
     recargas_retail = df_cant_filtrado["Retail"].sum() if not df_cant_filtrado.empty else 0
     monto_modo = df_monto_filtrado["MODO"].sum() if not df_monto_filtrado.empty else 0
     monto_retail = df_monto_filtrado["Retail"].sum() if not df_monto_filtrado.empty else 0
+    
+    # Calcular recaudación para el período seleccionado
+    recaudacion_periodo = df_apuestas_filtrado["Recaudacion"].sum() if not df_apuestas_filtrado.empty else 0
 
-    # Generar figuras de gráficos
+    # Generar figuras de gráficos (SIN comparativa)
     fig_monto = px.line(df_monto_filtrado, x="Fecha_Dia", y=["MODO", "Retail"],
                         title="$ por día por canal", labels={"value": "$", "variable": "Canal"})
     fig_cant = px.bar(df_cant_filtrado, x="Fecha_Dia", y=["MODO", "Retail"],
@@ -314,7 +321,7 @@ def actualizar_dashboard(start, end):
     fig_modo = px.line(df_modo_filtrado, x="Fecha_Dia", y="Usuarios_Unicos",
                        title="Usuarios únicos MODO por día")
     fig_prom = px.line(df_prom_filtrado, x="Fecha_Dia", y=["MODO", "Retail"],
-                       title="Depósito promedio diario — MODO vs Retail", labels={"value": "$", "variable": "Canal"})
+                       title="Depósito promedio diario – MODO vs Retail", labels={"value": "$", "variable": "Canal"})
     fig_total_juegos_mes = px.bar(
         df_total_juegos_mes_filtrado,
         x="AñoMes",
@@ -323,11 +330,8 @@ def actualizar_dashboard(start, end):
         title="Total de Apuestas por Juego y Mes",
         labels={"Total_Bets": "Total de Apuestas", "AñoMes": "Año-Mes"}
     )
-    fig_comp = px.bar(df_comp, x="Periodo", y=["Depositos_$", "Recaudacion_$"],
-                      barmode="group", title="Antes/Después MODO",
-                      labels={"value": "$", "variable": "Tipo"})
     
-    # Devolver los valores actualizados
+    # Devolver los valores actualizados (SIN fig_comp)
     return (
         f"{promedio_deposito:,.2f}",
         f"{usuarios_total:,.0f}",
@@ -337,12 +341,12 @@ def actualizar_dashboard(start, end):
         f"{recargas_retail:,.0f}",
         f"{monto_modo:,.2f}",
         f"{monto_retail:,.2f}",
+        f"${recaudacion_periodo:,.2f}",  # Nueva KPI de recaudación
         fig_monto,
         fig_cant,
         fig_modo,
         fig_prom,
         fig_total_juegos_mes,
-        fig_comp
     )
 
 
@@ -350,4 +354,3 @@ if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 10000))
     app.run(debug=False, host="0.0.0.0", port=port)
-

@@ -834,3 +834,17 @@ except Exception as e:
     print(f"⚠️ Error al exportar reportes adicionales: {e}")
 
 print("🏁  Proceso incremental terminado.")
+
+# ========= Exportar apuestas diarias para KPI de recaudación =========
+try:
+    # Crear dataset de apuestas diarias para el dashboard
+    apuestas_diarias = (
+        apuestas.groupby("Fecha_Dia")
+                .agg(Recaudacion=("Importe", "sum"))
+                .reset_index()
+                .sort_values("Fecha_Dia")
+    )
+    apuestas_diarias.to_csv(csv_dir / "apuestas_diario.csv", index=False)
+    print("✅ CSV generado: apuestas_diario.csv")
+except Exception as e:
+    print(f"⚠️ Error al generar apuestas_diario.csv: {e}")
