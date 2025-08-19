@@ -13,9 +13,6 @@ from datetime import datetime, timedelta
 import warnings, shutil, unicodedata, os, time
 import pandas as pd
 import numpy as np
-from openpyxl import load_workbook
-from openpyxl.chart import LineChart, BarChart, Reference
-from openpyxl.utils.exceptions import InvalidFileException
 
 warnings.filterwarnings("ignore", message="Workbook contains no default style")
 
@@ -99,30 +96,26 @@ for f in DATA_DIR.glob("*.xls"):
         pendientes.append((f, mt))
 
 nuevos_df = []
-if pendientes:
-    for f, mt in pendientes:
-        print("   • Procesando", f.name)
-        df_tmp = leer_movimientos(f)
-        if df_tmp is not None:
-            nuevos_df.append(df_tmp)
-            # mover a processed/YYYY-MM/
-            dest_dir = PROC_DIR / f"{df_tmp['Fecha'].dt.to_period('M').iloc[0]}"
-            dest_dir.mkdir(exist_ok=True)
-            try:
-                shutil.move(str(f), dest_dir / f.name)
-            except shutil.Error as e:
-                print(f"⚠️ Error al mover el archivo {f.name}: {e}. El archivo puede ya existir en el destino.")
-            # actualizar manifest
-            manifest = manifest[manifest["archivo"] != f.name]
-            manifest.loc[len(manifest)] = [f.name, mt]
+for f, mt in pendientes:
+    print("   • Procesando", f.name)
+    df_tmp = leer_movimientos(f)
+    if df_tmp is not None:
+        nuevos_df.append(df_tmp)
+        # mover a processed/YYYY-MM/
+        dest_dir = PROC_DIR / f"{df_tmp['Fecha'].dt.to_period('M').iloc[0]}"
+        dest_dir.mkdir(exist_ok=True)
+        shutil.move(str(f), dest_dir / f.name)
+        # actualizar manifest
+        manifest = manifest[manifest["archivo"] != f.name]
+        manifest.loc[len(manifest)] = [f.name, mt]
 
-    # actualizar parquet maestro
+# actualizar parquet maestro
+if nuevos_df:
     df_new = pd.concat(nuevos_df, ignore_index=True)
     if MASTER_FILE.exists():
         df_old = pd.read_parquet(MASTER_FILE)
         data_total = pd.concat([df_old, df_new], ignore_index=True)
-        data_total.drop_duplicates(subset=["Nro. Transacción"], keep='last', inplace=True)
-
+        data_total.drop_duplicates(subset=["Nro. Transacción"], inplace=True)
     else:
         data_total = df_new
     data_total.to_parquet(MASTER_FILE, index=False)
@@ -131,18 +124,14 @@ if pendientes:
 else:
     if not MASTER_FILE.exists():
         raise RuntimeError("No hay parquet maestro y no se encontraron .xls para procesar.")
+    data_total = pd.read_parquet(MASTER_FILE)
     print("✅ Dataset maestro ya estaba al día.")
 
-# ================== BLOQUE DE GENERACIÓN DE REPORTE ==================
-# **Asegurarse de cargar la data más reciente**
-try:
-    data_total = pd.read_parquet(MASTER_FILE)
-    print(f"📊  Movimientos totales en dataset: {len(data_total):,}")
-    data = data_total.copy()
-except Exception as e:
-    print(f"❌ Error al cargar el dataset maestro: {e}")
-    exit()
+# trabajar con copia para no modificar el maestro accidentalmente
+data = data_total.copy()
+print(f"📊  Movimientos totales en dataset: {len(data):,}")
 
+# ========= (lo que sigue es *idéntico* a la última versión estable) =========
 ## ========= APUESTAS =========
 apuestas = data[data["Tipo Mov."].str.contains("apuesta|jugada", case=False, na=False)].copy()
 apuestas["AñoMes"]    = apuestas["Fecha"].dt.to_period("M")
@@ -359,12 +348,12 @@ jugadores_modo_y_jugaron = len(modo_post_docs & jugadores_post_modo_docs)
 
 usuarios_hitos = pd.DataFrame({
     "Concepto": [
-        f"Nuevos >= {FECHA_LANZ_JUEGOS.strftime('%Y-%m-%d')} (cualquier mov.)",
-        f"Jugadores >= {FECHA_LANZ_JUEGOS.strftime('%Y-%m-%d')} (cualquier apuesta)",
-        f"Apostaron Quini/Loto >= {FECHA_LANZ_JUEGOS.strftime('%Y-%m-%d')}",
-        f"Recargaron MODO >= {FECHA_MODO_FULL.strftime('%Y-%m-%d')}",
-        f"Jugadores >= {FECHA_MODO_FULL.strftime('%Y-%m-%d')} (cualquier apuesta)",
-        f"Recargaron MODO y jugaron >= {FECHA_MODO_FULL.strftime('%Y-%m-%d')}",
+        "Nuevos >= 2025-04-14 (cualquier mov.)",
+        "Jugadores >= 2025-04-14 (cualquier apuesta)",
+        "Apostaron Quini/Loto >= 2025-04-14",
+        "Recargaron MODO >= 2025-07-07",
+        "Jugadores >= 2025-07-07 (cualquier apuesta)",
+        "Recargaron MODO y jugaron >= 2025-07-07",
     ],
     "Valor": [
         nuevos_desde_juegos,
@@ -383,7 +372,7 @@ rec_before = apuestas.loc[apuestas["Fecha"] < FECHA_MODO_FULL, "Importe"].sum()
 rec_after  = apuestas.loc[apuestas["Fecha"] >= FECHA_MODO_FULL, "Importe"].sum()
 
 comparativa_modo = pd.DataFrame({
-    "Periodo": [f"Before {FECHA_MODO_FULL.strftime('%d/%m/%Y')}", f"After {FECHA_MODO_FULL.strftime('%d/%m/%Y')}"],
+    "Periodo": ["Before 07/07/2025", "After 07/07/2025"],
     "Depositos_$": [dep_before, dep_after],
     "Recaudacion_$": [rec_before, rec_after],
 })
@@ -401,10 +390,10 @@ agg_canal = (
                Monto=("Importe", "sum"))
           .reset_index()
 )
-recargas_modo   = int(agg_canal.loc[agg_canal["Canal"]=="MODO","Recargas"].sum()) if not agg_canal.empty else 0
-recargas_retail = int(agg_canal.loc[agg_canal["Canal"]=="Retail","Recargas"].sum()) if not agg_canal.empty else 0
-monto_modo      = float(agg_canal.loc[agg_canal["Canal"]=="MODO","Monto"].sum()) if not agg_canal.empty else 0.0
-monto_retail    = float(agg_canal.loc[agg_canal["Canal"]=="Retail","Monto"].sum()) if not agg_canal.empty else 0.0
+recargas_modo   = int(agg_canal.loc[agg_canal["Canal"]=="MODO","Recargas"].sum())
+recargas_retail = int(agg_canal.loc[agg_canal["Canal"]=="Retail","Recargas"].sum())
+monto_modo      = float(agg_canal.loc[agg_canal["Canal"]=="MODO","Monto"].sum())
+monto_retail    = float(agg_canal.loc[agg_canal["Canal"]=="Retail","Monto"].sum())
 
 resumen_kpis = pd.DataFrame({
     "KPI": [
@@ -439,11 +428,15 @@ top10_por_juego_con_datos = {}
 # ========= Top10 contactos (opcional) =========
 if USUARIOS_FILE.exists():
     try:
+        # Cargar usuarios, limpiar y normalizar
         usuarios_raw = pd.read_excel(USUARIOS_FILE)
         usuarios_raw.columns = usuarios_raw.columns.str.strip()
+        # Normalizar el nombre de la columna "Fecha_Alta" si es necesario
         if "Fecha_Alta" not in usuarios_raw.columns and "Fecha Alta" in usuarios_raw.columns:
             usuarios_raw.rename(columns={"Fecha Alta": "Fecha_Alta"}, inplace=True)
+        # Intentar parsear las fechas con el método dayfirst para mayor robustez
         usuarios_raw["Fecha_Alta"] = pd.to_datetime(usuarios_raw["Fecha_Alta"], dayfirst=True, errors="coerce")
+        # Copia para no modificar el df original
         usuarios = usuarios_raw.copy()
 
         if "DNI" not in usuarios.columns:
@@ -473,6 +466,7 @@ if USUARIOS_FILE.exists():
 # ==============================================
 # Detectar usuarios NUEVOS y REACTIVADOS con MODO (desde 7/7)
 # ==============================================
+# Primero, generamos el CSV con los movimientos MODO para el siguiente paso
 try:
     modo_movimientos = cargas[cargas["Canal"] == "MODO"][["Documento", "Fecha", "Importe"]].copy()
     modo_movimientos.to_csv(csv_dir / "movimientos_modo.csv", index=False)
@@ -480,45 +474,60 @@ try:
 except Exception as e:
     print(f"⚠️ Error al generar movimientos_modo.csv: {e}")
 
+# Ahora procesamos los usuarios nuevos y reactivados
 if USUARIOS_FILE.exists():
     try:
+        # Cargar usuarios
         usuarios = pd.read_excel(USUARIOS_FILE)
         usuarios.columns = usuarios.columns.str.strip()
+        # Normalizar el nombre de la columna "Fecha_Alta" si es necesario
         if "Fecha_Alta" not in usuarios.columns and "Fecha Alta" in usuarios.columns:
             usuarios.rename(columns={"Fecha Alta": "Fecha_Alta"}, inplace=True)
         usuarios["Fecha_Alta"] = pd.to_datetime(usuarios["Fecha_Alta"], dayfirst=True, errors="coerce")
         
+        # Normalizar DNI
         usuarios["Documento"] = pd.to_numeric(
             usuarios["Documento"].astype(str).str.extract(r"(\d+)")[0].str.lstrip("0"),
             errors="coerce"
         )
         usuarios = usuarios.dropna(subset=["Documento"])
 
+        # Identificar usuarios nuevos registrados a partir de FECHA_MODO_FULL
+        # Se agregan los datos de Usuario y Correo a partir del DataFrame original de usuarios
         usuarios_nuevos_modo = usuarios[usuarios["Fecha_Alta"] >= FECHA_MODO_FULL].copy()
+
+        # Asegurarse de que el DataFrame de nuevos usuarios tenga solo las columnas relevantes
+        # Se incluye "Usuario" y "Correo" ahora
         usuarios_nuevos_modo = usuarios_nuevos_modo[["Documento", "Fecha_Alta", "Usuario", "Correo"]].copy()
         
         print("✅ DataFrame generado: usuarios_nuevos_modo")
 
+        # Solo registrados entre 2021 y 2024
         antiguos = usuarios[usuarios["Fecha_Alta"].dt.year.between(2021, 2024)].copy()
 
+        # Cargar movimientos MODO desde el CSV que acabamos de crear
         cargas_modo = pd.read_csv(csv_dir / "movimientos_modo.csv")
+        # Convertir explícitamente la columna de fecha para evitar errores
         cargas_modo["Fecha"] = pd.to_datetime(cargas_modo["Fecha"], dayfirst=True, errors="coerce")
         cargas_modo["Documento"] = pd.to_numeric(
             cargas_modo["Documento"].astype(str).str.extract(r"(\d+)")[0].str.lstrip("0"),
             errors="coerce"
         )
 
+        # Quién recargó antes y después del 7/7
         jugaban_antes = set(cargas_modo[cargas_modo["Fecha"] < FECHA_MODO_FULL]["Documento"])
         jugaban_despues = set(cargas_modo[cargas_modo["Fecha"] >= FECHA_MODO_FULL]["Documento"])
 
+        # Reactivados = antiguos que no jugaban antes pero sí después
         reactivados = antiguos[antiguos["Documento"].isin(jugaban_despues - jugaban_antes)].copy()
         
+        # Obtener primera recarga MODO desde 7/7
         primer_modo = cargas_modo[cargas_modo["Fecha"] >= FECHA_MODO_FULL].sort_values("Fecha").drop_duplicates("Documento")
         usuarios_reactivados_modo = reactivados.merge(
             primer_modo[["Documento", "Fecha"]],
             left_on="Documento", right_on="Documento", how="left"
         )
-        
+        # Intentar eliminar el archivo antes de escribir para evitar "Permission denied"
         reactivados_csv_path = csv_dir / "reactivados_modo.csv"
         if reactivados_csv_path.exists():
             os.remove(reactivados_csv_path)
@@ -526,12 +535,14 @@ if USUARIOS_FILE.exists():
         usuarios_reactivados_modo.to_csv(reactivados_csv_path, index=False)
         print("✅ CSV generado: reactivados_modo.csv")
 
+        # Exportar el DataFrame de nuevos usuarios directamente al CSV
         nuevos_csv_path = csv_dir / "nuevos_modo.csv"
         if nuevos_csv_path.exists():
             os.remove(nuevos_csv_path)
         usuarios_nuevos_modo.to_csv(nuevos_csv_path, index=False)
         print("✅ CSV generado: nuevos_modo.csv")
 
+        # Generar CSV para el total de nuevos usuarios
         total_nuevos_modo = usuarios_nuevos_modo.shape[0]
         pd.DataFrame([{"KPI": f"Total Nuevos Usuarios desde {FECHA_MODO_FULL.strftime('%d/%m/%Y')}", "Valor": total_nuevos_modo}]).to_csv(csv_dir / "total_usuarios_nuevos_modo.csv", index=False)
         print("✅ CSV generado: total_usuarios_nuevos_modo.csv")
@@ -543,10 +554,13 @@ if USUARIOS_FILE.exists():
 # ========= Top10 por juego con datos personales =========
 if USUARIOS_FILE.exists():
     try:
+        # Cargar y limpiar usuarios
         usuarios = pd.read_excel(USUARIOS_FILE)
         usuarios.columns = usuarios.columns.str.strip()
+        # Normalizar el nombre de la columna "Fecha_Alta" si es necesario
         if "Fecha_Alta" not in usuarios.columns and "Fecha Alta" in usuarios.columns:
             usuarios.rename(columns={"Fecha Alta": "Fecha_Alta"}, inplace=True)
+        # Intentar parsear las fechas con el método dayfirst para mayor robustez
         usuarios["Fecha_Alta"] = pd.to_datetime(usuarios["Fecha_Alta"], dayfirst=True, errors="coerce")
 
         if "Documento" in usuarios.columns:
@@ -568,267 +582,235 @@ if USUARIOS_FILE.exists():
         print(f"⚠️  Error al generar Top10 por juego con datos: {e}")
 
 # Nuevo: generar CSV para el total de apuestas por juego y por mes
-try:
-    total_juegos_mes = (
-        apuestas.groupby(["AñoMes", "Juego"])["Importe"]
-        .count()
-        .rename("Total_Bets")
-        .reset_index()
-    )
-    total_juegos_mes.to_csv(csv_dir / "total_juegos_mes.csv", index=False)
-    print("✅ CSV generado: total_juegos_mes.csv")
-except Exception as e:
-    print(f"⚠️ Error al generar total_juegos_mes.csv: {e}")
+total_juegos_mes = (
+    apuestas.groupby(["AñoMes", "Juego"])["Importe"]
+    .count()
+    .rename("Total_Bets")
+    .reset_index()
+)
+total_juegos_mes.to_csv(csv_dir / "total_juegos_mes.csv", index=False)
+print("✅ CSV generado: total_juegos_mes.csv")
 
 
 # ========= Exportar: archivo analítico con gráficos (openpyxl) =========
-print(f"📝 Generando el archivo analítico: {SALIDA_ANALITICO}...")
-try:
-    with pd.ExcelWriter(SALIDA_ANALITICO, engine="openpyxl", mode="w") as writer:
-        resumen_kpis.to_excel(writer,              sheet_name="Resumen_Datos",     index=False)
-        cliente_mes.to_excel(writer,               sheet_name="Cliente_Mes",       index=False)
-        top_games_total.to_excel(writer,           sheet_name="Top_Games_Total",   index=False)
-        top_games_mes.to_excel(writer,             sheet_name="Top_Games_Mes",     index=False)
+with pd.ExcelWriter(SALIDA_ANALITICO, engine="openpyxl", mode="w") as writer:
+    resumen_kpis.to_excel(writer,              sheet_name="Resumen_Datos",     index=False)
+    cliente_mes.to_excel(writer,               sheet_name="Cliente_Mes",       index=False)
+    top_games_total.to_excel(writer,           sheet_name="Top_Games_Total",   index=False)
+    top_games_mes.to_excel(writer,             sheet_name="Top_Games_Mes",     index=False)
 
-        for sheet, df in game_summaries.items():
-            df.to_excel(writer, sheet_name=sheet, index=False)
+    for sheet, df in game_summaries.items():
+        df.to_excel(writer, sheet_name=sheet, index=False)
 
-        recargas_diario_canal.to_excel(writer,     sheet_name="Recargas_Diario",   index=False)
-        recargas_dia_monto.to_excel(writer,        sheet_name="Recargas_Dia_Monto",index=False)
-        recargas_dia_cant.to_excel(writer,         sheet_name="Recargas_Dia_Cant", index=False)
-        modo_diario.to_excel(writer,               sheet_name="MODO_Diario",       index=False)
-        retiros_diario.to_excel(writer,            sheet_name="Retiros_Diario",    index=False)
-        premios_resumen.to_excel(writer,           sheet_name="Ganadores",         index=False)
-        juego_dia_detalle.to_excel(writer,         sheet_name="Juego_Dia_Detalle", index=False)
-        dia_totales.to_excel(writer,               sheet_name="Dia_Totales",       index=False)
-        retencion_modo.to_excel(writer,            sheet_name="Retencion_MODO",    index=False)
-        usuarios_mes.to_excel(writer,              sheet_name="Usuarios_Mes",      index=False)
-        usuarios_hitos.to_excel(writer,            sheet_name="Usuarios_Hitos",    index=False)
-        comparativa_modo.to_excel(writer,          sheet_name="Comparativa_MODO",  index=False)
+    recargas_diario_canal.to_excel(writer,     sheet_name="Recargas_Diario",   index=False)
+    recargas_dia_monto.to_excel(writer,        sheet_name="Recargas_Dia_Monto",index=False)
+    recargas_dia_cant.to_excel(writer,         sheet_name="Recargas_Dia_Cant", index=False)
+    modo_diario.to_excel(writer,               sheet_name="MODO_Diario",       index=False)
+    retiros_diario.to_excel(writer,            sheet_name="Retiros_Diario",    index=False)
+    premios_resumen.to_excel(writer,           sheet_name="Ganadores",         index=False)
+    juego_dia_detalle.to_excel(writer,         sheet_name="Juego_Dia_Detalle", index=False)
+    dia_totales.to_excel(writer,               sheet_name="Dia_Totales",       index=False)
+    retencion_modo.to_excel(writer,            sheet_name="Retencion_MODO",    index=False)
+    usuarios_mes.to_excel(writer,              sheet_name="Usuarios_Mes",      index=False)
+    usuarios_hitos.to_excel(writer,            sheet_name="Usuarios_Hitos",    index=False)
+    comparativa_modo.to_excel(writer,          sheet_name="Comparativa_MODO",  index=False)
 
-        if top10_contactos is not None and not top10_contactos.empty:
-            top10_contactos.to_excel(writer,      sheet_name="Top10_Contactos",    index=False)
-        
-        if usuarios_nuevos_modo is not None and not usuarios_nuevos_modo.empty:
-            usuarios_nuevos_modo.to_excel(writer, sheet_name="Nuevos_MODO", index=False)
-
-        if usuarios_reactivados_modo is not None and not usuarios_reactivados_modo.empty:
-            usuarios_reactivados_modo.to_excel(writer, sheet_name="Reactivados_MODO", index=False)
-            
-        for juego, df in top10_por_juego_con_datos.items():
-            if not df.empty:
-                df.to_excel(writer, sheet_name=f"Top10_{juego}", index=False)
-
-    print("✅ Hojas de datos guardadas en el Excel.")
+    if top10_contactos is not None and not top10_contactos.empty:
+        top10_contactos.to_excel(writer,      sheet_name="Top10_Contactos",    index=False)
     
-    # Reabrir el archivo para agregar los gráficos
-    wb = load_workbook(SALIDA_ANALITICO)
+    if usuarios_nuevos_modo is not None and not usuarios_nuevos_modo.empty:
+        usuarios_nuevos_modo.to_excel(writer, sheet_name="Nuevos_MODO", index=False)
 
-    if "Resumen" in wb.sheetnames:
-        wb.remove(wb["Resumen"])
-    ws = wb.create_sheet("Resumen", 0)
+    if usuarios_reactivados_modo is not None and not usuarios_reactivados_modo.empty:
+        usuarios_reactivados_modo.to_excel(writer, sheet_name="Reactivados_MODO", index=False)
+        
+    for juego, df in top10_por_juego_con_datos.items():
+        if not df.empty:
+            df.to_excel(writer, sheet_name=f"Top10_{juego}", index=False)
 
-    ws["A1"]  = "KPIs principales"
-    ws["A3"]  = "Promedio depósito $";            ws["B3"]  = promedio_deposito
-    ws["A4"]  = "Usuarios únicos (mov.)";         ws["B4"]  = cant_unicos_total
-    ws["A5"]  = "Usuarios únicos apostadores";    ws["B5"]  = cant_unicos_apuestan
-    ws["A6"]  = "Usuarios únicos que recargaron"; ws["B6"]  = cant_recargas_unicas
-    ws["A8"]  = "Recargas MODO";                  ws["B8"]  = recargas_modo
-    ws["A9"]  = "Recargas Retail";                ws["B9"]  = recargas_retail
-    ws["A11"] = "Monto MODO $";                   ws["B11"] = monto_modo
-    ws["A12"] = "Monto Retail $";                 ws["B12"] = monto_retail
-    for cell in ["B3","B11","B12"]:
-        ws[cell].number_format = '#,##0.00'
-    for cell in ["B4","B5","B6","B8","B9"]:
-        ws[cell].number_format = '#,##0'
+# ----- Hoja RESUMEN + gráficos
+from openpyxl import load_workbook
+from openpyxl.chart import LineChart, BarChart, Reference
 
-    # $ por día por canal
-    sheet_monto = wb["Recargas_Dia_Monto"]
-    max_row = sheet_monto.max_row
-    max_col = sheet_monto.max_column
-    line1 = LineChart()
-    line1.title = "$ por día por canal"
-    line1.y_axis.title = "$"
-    line1.x_axis.title = "Fecha"
-    data_ref = Reference(sheet_monto, min_col=2, min_row=1, max_col=max_col, max_row=max_row)
-    cats_ref = Reference(sheet_monto, min_col=1, min_row=2, max_row=max_row)
-    line1.add_data(data_ref, titles_from_data=True)
-    line1.set_categories(cats_ref)
-    line1.height = 11
-    line1.width = 24
-    ws.add_chart(line1, "D2")
+wb = load_workbook(SALIDA_ANALITICO)
+if "Resumen" in wb.sheetnames:
+    wb.remove(wb["Resumen"])
+ws = wb.create_sheet("Resumen", 0)
 
-    # Cantidad de recargas por día por canal
-    sheet_cnt = wb["Recargas_Dia_Cant"]
-    max_row2 = sheet_cnt.max_row
-    max_col2 = sheet_cnt.max_column
-    bar1 = BarChart()
-    bar1.type = "col"
-    bar1.title = "Recargas por día por canal"
-    bar1.y_axis.title = "Recargas"
-    bar1.x_axis.title = "Fecha"
-    data_ref2 = Reference(sheet_cnt, min_col=2, min_row=1, max_col=max_col2, max_row=max_row2)
-    cats_ref2 = Reference(sheet_cnt, min_col=1, min_row=2, max_row=max_row2)
-    bar1.add_data(data_ref2, titles_from_data=True)
-    bar1.set_categories(cats_ref2)
-    bar1.height = 11
-    bar1.width = 24
-    ws.add_chart(bar1, "D18")
+ws["A1"]  = "KPIs principales"
+ws["A3"]  = "Promedio depósito $";            ws["B3"]  = promedio_deposito
+ws["A4"]  = "Usuarios únicos (mov.)";         ws["B4"]  = cant_unicos_total
+ws["A5"]  = "Usuarios únicos apostadores";    ws["B5"]  = cant_unicos_apuestan
+ws["A6"]  = "Usuarios únicos que recargaron"; ws["B6"]  = cant_recargas_unicas
+ws["A8"]  = "Recargas MODO";                  ws["B8"]  = recargas_modo
+ws["A9"]  = "Recargas Retail";                ws["B9"]  = recargas_retail
+ws["A11"] = "Monto MODO $";                   ws["B11"] = monto_modo
+ws["A12"] = "Monto Retail $";                 ws["B12"] = monto_retail
+for cell in ["B3","B11","B12"]:
+    ws[cell].number_format = '#,##0.00'
+for cell in ["B4","B5","B6","B8","B9"]:
+    ws[cell].number_format = '#,##0'
 
-    # Apuestas por juego (total)
-    sheet_games = wb["Top_Games_Total"]
-    max_row3 = sheet_games.max_row
-    bar2 = BarChart()
-    bar2.title = "Apuestas por juego (total)"
-    bar2.y_axis.title = "Bets"
-    cats3 = Reference(sheet_games, min_col=1, min_row=2, max_row=max_row3)
-    data3 = Reference(sheet_games, min_col=2, min_row=1, max_row=max_row3)
-    bar2.add_data(data3, titles_from_data=True)
-    bar2.set_categories(cats3)
-    bar2.height = 11
-    bar2.width = 24
-    ws.add_chart(bar2, "D34")
+# $ por día por canal
+sheet_monto = wb["Recargas_Dia_Monto"]
+max_row = sheet_monto.max_row
+max_col = sheet_monto.max_column
+line1 = LineChart()
+line1.title = "$ por día por canal"
+line1.y_axis.title = "$"
+line1.x_axis.title = "Fecha"
+data_ref = Reference(sheet_monto, min_col=2, min_row=1, max_col=max_col, max_row=max_row)
+cats_ref = Reference(sheet_monto, min_col=1, min_row=2, max_row=max_row)
+line1.add_data(data_ref, titles_from_data=True)
+line1.set_categories(cats_ref)
+line1.height = 11
+line1.width = 24
+ws.add_chart(line1, "D2")
 
-    # Apuestas por día de semana
-    sheet_dias = wb["Dia_Totales"]
-    max_row4 = sheet_dias.max_row
-    bar3 = BarChart()
-    bar3.title = "Apuestas por día de semana"
-    bar3.y_axis.title = "Bets"
-    cats4 = Reference(sheet_dias, min_col=1, min_row=2, max_row=max_row4)
-    data4 = Reference(sheet_dias, min_col=2, min_row=1, max_row=max_row4)
-    bar3.add_data(data4, titles_from_data=True)
-    bar3.set_categories(cats4)
-    bar3.height = 11
-    bar3.width = 24
-    ws.add_chart(bar3, "D50")
+# Cantidad de recargas por día por canal
+sheet_cnt = wb["Recargas_Dia_Cant"]
+max_row2 = sheet_cnt.max_row
+max_col2 = sheet_cnt.max_column
+bar1 = BarChart()
+bar1.type = "col"
+bar1.title = "Recargas por día por canal"
+bar1.y_axis.title = "Recargas"
+bar1.x_axis.title = "Fecha"
+data_ref2 = Reference(sheet_cnt, min_col=2, min_row=1, max_col=max_col2, max_row=max_row2)
+cats_ref2 = Reference(sheet_cnt, min_col=1, min_row=2, max_row=max_row2)
+bar1.add_data(data_ref2, titles_from_data=True)
+bar1.set_categories(cats_ref2)
+bar1.height = 11
+bar1.width = 24
+ws.add_chart(bar1, "D18")
 
-    # Before vs After 07/07
-    sheet_cmp = wb["Comparativa_MODO"]
-    bar4 = BarChart()
-    bar4.title = f"Before vs After {FECHA_MODO_FULL.strftime('%d/%m/%Y')}"
-    bar4.y_axis.title = "$"
-    cats5 = Reference(sheet_cmp, min_col=1, min_row=2, max_row=3)
-    data5 = Reference(sheet_cmp, min_col=2, min_row=1, max_col=3, max_row=3)
-    bar4.add_data(data5, titles_from_data=True)
-    bar4.set_categories(cats5)
-    bar4.height = 11
-    bar4.width = 24
-    ws.add_chart(bar4, "D66")
+# Apuestas por juego (total)
+sheet_games = wb["Top_Games_Total"]
+max_row3 = sheet_games.max_row
+bar2 = BarChart()
+bar2.title = "Apuestas por juego (total)"
+bar2.y_axis.title = "Bets"
+cats3 = Reference(sheet_games, min_col=1, min_row=2, max_row=max_row3)
+data3 = Reference(sheet_games, min_col=2, min_row=1, max_row=max_row3)
+bar2.add_data(data3, titles_from_data=True)
+bar2.set_categories(cats3)
+bar2.height = 11
+bar2.width = 24
+ws.add_chart(bar2, "D34")
 
-    # Uso por juego por día con filtro de fechas (SUMIFS)
-    sheet_det = wb["Juego_Dia_Detalle"]
-    min_date = sheet_det["A2"].value
-    max_date = sheet_det[f"A{sheet_det.max_row}"].value
-    ws["A86"] = "Fecha inicio"; ws["B86"] = min_date
-    ws["A87"] = "Fecha fin";    ws["B87"] = max_date
-    for c in ("B86","B87"): ws[c].number_format = "yyyy-mm-dd"
+# Apuestas por día de semana
+sheet_dias = wb["Dia_Totales"]
+max_row4 = sheet_dias.max_row
+bar3 = BarChart()
+bar3.title = "Apuestas por día de semana"
+bar3.y_axis.title = "Bets"
+cats4 = Reference(sheet_dias, min_col=1, min_row=2, max_row=max_row4)
+data4 = Reference(sheet_dias, min_col=2, min_row=1, max_row=max_row4)
+bar3.add_data(data4, titles_from_data=True)
+bar3.set_categories(cats4)
+bar3.height = 11
+bar3.width = 24
+ws.add_chart(bar3, "D50")
 
-    row = 90
-    d = pd.to_datetime(min_date).date()
-    end = pd.to_datetime(max_date).date()
-    while d <= end:
-        ws[f"A{row}"] = d
-        ws[f"A{row}"].number_format = "yyyy-mm-dd"
-        row += 1
-        d += timedelta(days=1)
-    last_row_dates = row - 1
+# Before vs After 07/07
+sheet_cmp = wb["Comparativa_MODO"]
+bar4 = BarChart()
+bar4.title = "Before vs After 07/07/2025"
+bar4.y_axis.title = "$"
+cats5 = Reference(sheet_cmp, min_col=1, min_row=2, max_row=3)
+data5 = Reference(sheet_cmp, min_col=2, min_row=1, max_col=3, max_row=3)
+bar4.add_data(data5, titles_from_data=True)
+bar4.set_categories(cats5)
+bar4.height = 11
+bar4.width = 24
+ws.add_chart(bar4, "D66")
 
-    max_row_games = sheet_games.max_row
-    topN = min(6, max_row_games - 1)
-    games = [sheet_games[f"A{r}"].value for r in range(2, 2 + topN)]
-    ws["B89"] = "Bets (por juego y día)"
-    for idx, g in enumerate(games, start=2):
-        ws.cell(row=89, column=idx).value = g
 
-    det_rows = sheet_det.max_row
-    for r in range(90, last_row_dates + 1):
-        date_cell = f"A{r}"
-        for i, g in enumerate(games, start=2):
-            ws.cell(row=r, column=i).value = (
-                f'=IF(AND({date_cell}>=B86,{date_cell}<=B87),'
-                f'SUMIFS(Juego_Dia_Detalle!$C$2:$C${det_rows},'
-                f'Juego_Dia_Detalle!$B$2:$B${det_rows},"{g}",'
-                f'Juego_Dia_Detalle!$A$2:$A${det_rows},{date_cell}),'
-                f'NA())'
-            )
 
-    chart = LineChart()
-    chart.title = "Uso por juego por día (filtrado)"
-    chart.y_axis.title = "Bets"
-    chart.x_axis.title = "Fecha"
-    min_col = 2
-    max_col = 1 + len(games)
-    data_ref = Reference(ws, min_col=min_col, min_row=89, max_col=max_col, max_row=last_row_dates)
-    cats_ref = Reference(ws, min_col=1, min_row=90, max_row=last_row_dates)
-    chart.add_data(data_ref, titles_from_data=True)
-    chart.set_categories(cats_ref)
-    chart.height = 15
-    chart.width  = 28
-    ws.add_chart(chart, "D82")
+# Uso por juego por día con filtro de fechas (SUMIFS)
+sheet_det = wb["Juego_Dia_Detalle"]
+min_date = sheet_det["A2"].value
+max_date = sheet_det[f"A{sheet_det.max_row}"].value
+ws["A86"] = "Fecha inicio"; ws["B86"] = min_date
+ws["A87"] = "Fecha fin";    ws["B87"] = max_date
+for c in ("B86","B87"): ws[c].number_format = "yyyy-mm-dd"
 
-    # Guardar el Excel
-    wb.save(SALIDA_ANALITICO)
-    print(f"✅ Archivo final guardado con éxito: {SALIDA_ANALITICO}")
-except Exception as e:
-    print(f"❌ Error al guardar el archivo analítico: {e}")
-    # En caso de error, podría ser útil intentar guardar el archivo sin gráficos
-    # para no perder la información procesada
-    print("Intentando guardar solo los datos...")
+row = 90
+d = pd.to_datetime(min_date).date()
+end = pd.to_datetime(max_date).date()
+while d <= end:
+    ws[f"A{row}"] = d
+    ws[f"A{row}"].number_format = "yyyy-mm-dd"
+    row += 1
+    d += timedelta(days=1)
+last_row_dates = row - 1
+
+max_row_games = sheet_games.max_row
+topN = min(6, max_row_games - 1)
+games = [sheet_games[f"A{r}"].value for r in range(2, 2 + topN)]
+ws["B89"] = "Bets (por juego y día)"
+for idx, g in enumerate(games, start=2):
+    ws.cell(row=89, column=idx).value = g
+
+det_rows = sheet_det.max_row
+for r in range(90, last_row_dates + 1):
+    date_cell = f"A{r}"
+    for i, g in enumerate(games, start=2):
+        ws.cell(row=r, column=i).value = (
+            f'=IF(AND({date_cell}>=B86,{date_cell}<=B87),'
+            f'SUMIFS(Juego_Dia_Detalle!$C$2:$C${det_rows},'
+            f'Juego_Dia_Detalle!$B$2:$B${det_rows},"{g}",'
+            f'Juego_Dia_Detalle!$A$2:$A${det_rows},{date_cell}),'
+            f'NA())'
+        )
+
+from openpyxl.chart import LineChart
+chart = LineChart()
+chart.title = "Uso por juego por día (filtrado)"
+chart.y_axis.title = "Bets"
+chart.x_axis.title = "Fecha"
+min_col = 2
+max_col = 1 + len(games)
+data_ref = Reference(ws, min_col=min_col, min_row=89, max_col=max_col, max_row=last_row_dates)
+cats_ref = Reference(ws, min_col=1, min_row=90, max_row=last_row_dates)
+chart.add_data(data_ref, titles_from_data=True)
+chart.set_categories(cats_ref)
+chart.height = 15
+chart.width  = 28
+ws.add_chart(chart, "D82")
+
+# Guardar el Excel
+wb.save(SALIDA_ANALITICO)
+print(f"✅ Archivo guardado: {SALIDA_ANALITICO}")
+
+# ========= Exportar hojas clave como CSV para dashboard HTML =========
+def export_csv(sheet_name, filename):
     try:
-        with pd.ExcelWriter(SALIDA_ANALITICO, engine="openpyxl", mode="w") as writer:
-            resumen_kpis.to_excel(writer, sheet_name="Resumen_Datos", index=False)
-            cliente_mes.to_excel(writer, sheet_name="Cliente_Mes", index=False)
-            top_games_total.to_excel(writer, sheet_name="Top_Games_Total", index=False)
-            top_games_mes.to_excel(writer, sheet_name="Top_Games_Mes", index=False)
-            recargas_diario_canal.to_excel(writer, sheet_name="Recargas_Diario", index=False)
-            recargas_dia_monto.to_excel(writer, sheet_name="Recargas_Dia_Monto", index=False)
-            recargas_dia_cant.to_excel(writer, sheet_name="Recargas_Dia_Cant", index=False)
-            modo_diario.to_excel(writer, sheet_name="MODO_Diario", index=False)
-            retiros_diario.to_excel(writer, sheet_name="Retiros_Diario", index=False)
-            premios_resumen.to_excel(writer, sheet_name="Ganadores", index=False)
-            juego_dia_detalle.to_excel(writer, sheet_name="Juego_Dia_Detalle", index=False)
-            dia_totales.to_excel(writer, sheet_name="Dia_Totales", index=False)
-            retencion_modo.to_excel(writer, sheet_name="Retencion_MODO", index=False)
-            usuarios_mes.to_excel(writer, sheet_name="Usuarios_Mes", index=False)
-            usuarios_hitos.to_excel(writer, sheet_name="Usuarios_Hitos", index=False)
-            comparativa_modo.to_excel(writer, sheet_name="Comparativa_MODO", index=False)
-            if top10_contactos is not None and not top10_contactos.empty:
-                top10_contactos.to_excel(writer, sheet_name="Top10_Contactos", index=False)
-            if usuarios_nuevos_modo is not None and not usuarios_nuevos_modo.empty:
-                usuarios_nuevos_modo.to_excel(writer, sheet_name="Nuevos_MODO", index=False)
-            if usuarios_reactivados_modo is not None and not usuarios_reactivados_modo.empty:
-                usuarios_reactivados_modo.to_excel(writer, sheet_name="Reactivados_MODO", index=False)
-            for juego, df in top10_por_juego_con_datos.items():
-                if not df.empty:
-                    df.to_excel(writer, sheet_name=f"Top10_{juego}", index=False)
-        print("✅ Archivo guardado sin gráficos.")
-    except Exception as e_retry:
-        print(f"❌ Error crítico al intentar guardar de nuevo: {e_retry}. No se pudo generar el reporte.")
+        df = pd.read_excel(SALIDA_ANALITICO, sheet_name=sheet_name)
+        df.to_csv(csv_dir / filename, index=False)
+        print(f"✅ CSV generado: {filename}")
+    except Exception as e:
+        print(f"⚠️ Error al exportar {sheet_name} → {filename}: {e}")
 
-# --- Exportar CSVs DIRECTO desde DataFrames en memoria ---
+export_csv("MODO_Diario",         "modo_diario.csv")
+export_csv("Recargas_Dia_Monto", "recargas_monto.csv")
+export_csv("Recargas_Dia_Cant",  "recargas_cant.csv")
+export_csv("Comparativa_MODO",   "comparativa_modo.csv")
+export_csv("Resumen_Datos",      "kpis.csv")
+export_csv("Top_Games_Mes",      "jugadores_unicos_por_juego.csv")
+
+# ========= Exportar deposito_promedio.csv =========
 try:
-    modo_diario.to_csv(csv_dir / "modo_diario.csv", index=False)
-    recargas_dia_monto.to_csv(csv_dir / "recargas_monto.csv", index=False)
-    recargas_dia_cant.to_csv(csv_dir / "recargas_cant.csv", index=False)
-    comparativa_modo.to_csv(csv_dir / "comparativa_modo.csv", index=False)
-    resumen_kpis.to_csv(csv_dir / "kpis.csv", index=False)
-
-    # (Opcional) si necesitás un CSV por juego/mes
-    top_games_mes.to_csv(csv_dir / "jugadores_unicos_por_juego.csv", index=False)
-
-    # deposito_promedio.csv SIN re-abrir Excel:
-    prom = recargas_dia_monto.copy()
+    monto = pd.read_excel(SALIDA_ANALITICO, sheet_name="Recargas_Dia_Monto")
+    cant = pd.read_excel(SALIDA_ANALITICO, sheet_name="Recargas_Dia_Cant")
+    prom = monto.copy()
     for col in ["MODO", "Retail"]:
-        if col in recargas_dia_monto.columns and col in recargas_dia_cant.columns:
-            prom[col] = recargas_dia_monto[col] / recargas_dia_cant[col]
+        if col in monto.columns and col in cant.columns:
+            prom[col] = monto[col] / cant[col]
     prom.to_csv(csv_dir / "deposito_promedio.csv", index=False)
-
-    print("✅ CSVs escritos directamente desde memoria.")
-    print(f"📁 Carpeta CSV: {csv_dir.resolve()}")
+    print("✅ CSV generado: deposito_promedio.csv")
 except Exception as e:
-    print(f"⚠️ Error al exportar CSVs desde memoria: {e}")
-
+    print(f"⚠️ Error al generar deposito_promedio.csv: {e}")
 
 # ========= Exportar reportes adicionales (usuarios) =========
 try:
