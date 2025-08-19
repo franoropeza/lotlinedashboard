@@ -75,7 +75,7 @@ app.index_string = '''
 
 # Fecha de hito para el filtro de nuevos usuarios y cálculo de recaudación
 FECHA_MODO_FULL = pd.Timestamp("2025-07-07")
-CSV_DIR = "csv_dashboard" # Definir la carpeta de los CSV
+CSV_DIR = "." # Definir la carpeta de los CSV
 
 # ==================== Funciones de carga de datos ====================
 def cargar_csv_con_fechas(filename, date_col, dayfirst=False):
