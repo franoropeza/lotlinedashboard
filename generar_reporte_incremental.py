@@ -90,7 +90,16 @@ def get_mtime(p: Path) -> int:
 
 # ================== BLOQUE INCREMENTAL ==================
 print("🔄  Paso 1: identificar archivos nuevos…")
-manifest = pd.read_csv(MANIFEST_FILE) if MANIFEST_FILE.exists() else pd.DataFrame(columns=["archivo","mod_time"])
+# robust manifest loading
+expected_cols = ["archivo", "mod_time"]
+if MANIFEST_FILE.exists():
+    manifest = pd.read_csv(MANIFEST_FILE)
+    if list(manifest.columns) != expected_cols:
+        print(f"⚠️  Manifest file '{MANIFEST_FILE}' has incorrect columns. A new one will be created.")
+        manifest = pd.DataFrame(columns=expected_cols)
+else:
+    manifest = pd.DataFrame(columns=expected_cols)
+
 pendientes = []
 for f in DATA_DIR.glob("*.xls"):
     mt = get_mtime(f)
@@ -121,8 +130,8 @@ if pendientes:
     if MASTER_FILE.exists():
         df_old = pd.read_parquet(MASTER_FILE)
         data_total = pd.concat([df_old, df_new], ignore_index=True)
+        # CRITICAL FIX: keep='last' to ensure updates are reflected
         data_total.drop_duplicates(subset=["Nro. Transacción"], keep='last', inplace=True)
-
     else:
         data_total = df_new
     data_total.to_parquet(MASTER_FILE, index=False)
@@ -566,6 +575,110 @@ if USUARIOS_FILE.exists():
 
     except Exception as e:
         print(f"⚠️  Error al generar Top10 por juego con datos: {e}")
+
+# ========= KPIs de Actividad de Usuarios (para Upgrade 1 Dashboard) =========
+if USUARIOS_FILE.exists():
+    try:
+        total_registrados = len(usuarios)
+        total_activos = data["Documento"].nunique()
+        total_inactivos = total_registrados - total_activos
+        tasa_actividad = (total_activos / total_registrados) * 100 if total_registrados > 0 else 0
+
+        nuevos_kpis = pd.DataFrame({
+            "KPI": [
+                "Total Usuarios Registrados",
+                "Usuarios Activos (con mov.)",
+                "Usuarios Inactivos (sin mov.)",
+                "Tasa de Actividad (%)"
+            ],
+            "Valor": [
+                total_registrados,
+                total_activos,
+                total_inactivos,
+                tasa_actividad
+            ]
+        })
+        resumen_kpis = pd.concat([resumen_kpis, nuevos_kpis], ignore_index=True)
+        print("✅ KPIs de actividad de usuarios calculados.")
+    except NameError:
+        print("⚠️  DataFrame 'usuarios' no fue creado, no se pueden calcular KPIs de actividad.")
+    except Exception as e:
+        print(f"⚠️ Error al calcular KPIs de actividad de usuarios: {e}")
+
+# ========= Análisis de Retención de Nuevos Usuarios (para Upgrade 2 Dashboard) =========
+try:
+    # 1. Fecha del primer movimiento de cada usuario
+    primer_mov = data.groupby("Documento")["Fecha"].min().reset_index()
+    primer_mov.rename(columns={"Fecha": "Fecha_Primer_Mov"}, inplace=True)
+    primer_mov["Cohorte_Mes"] = primer_mov["Fecha_Primer_Mov"].dt.to_period("M")
+
+    # 2. Fecha de la primera apuesta de cada usuario
+    primer_apuesta = apuestas.groupby("Documento")["Fecha"].min().reset_index()
+    primer_apuesta.rename(columns={"Fecha": "Fecha_Primera_Apuesta"}, inplace=True)
+
+    # 3. Unir los datos
+    retencion_df = pd.merge(primer_mov, primer_apuesta, on="Documento", how="left")
+
+    # 4. Calcular días hasta la primera apuesta
+    retencion_df["Dias_Hasta_Apuesta"] = (retencion_df["Fecha_Primera_Apuesta"] - retencion_df["Fecha_Primer_Mov"]).dt.days
+
+    # 5. Marcar si apostaron en los primeros 7 y 30 días
+    retencion_df["Aposto_7_Dias"] = retencion_df["Dias_Hasta_Apuesta"] <= 7
+    retencion_df["Aposto_30_Dias"] = retencion_df["Dias_Hasta_Apuesta"] <= 30
+
+    # 6. Agregar por cohorte
+    cohort_summary = retencion_df.groupby("Cohorte_Mes").agg(
+        Total_Nuevos_Usuarios=("Documento", "count"),
+        Retenidos_7_Dias=("Aposto_7_Dias", "sum"),
+        Retenidos_30_Dias=("Aposto_30_Dias", "sum")
+    ).reset_index()
+
+    # 7. Calcular tasas de retención
+    cohort_summary["Tasa_Retencion_7_Dias"] = (cohort_summary["Retenidos_7_Dias"] / cohort_summary["Total_Nuevos_Usuarios"]) * 100
+    cohort_summary["Tasa_Retencion_30_Dias"] = (cohort_summary["Retenidos_30_Dias"] / cohort_summary["Total_Nuevos_Usuarios"]) * 100
+    
+    cohort_summary["Cohorte_Mes"] = cohort_summary["Cohorte_Mes"].astype(str)
+    cohort_summary.to_csv(csv_dir / "retencion_cohorts.csv", index=False)
+    print("✅ CSV generado: retencion_cohorts.csv para análisis de retención.")
+
+except Exception as e:
+    print(f"⚠️ Error al generar el análisis de retención: {e}")
+
+
+# ================== Exportar datos para Dashboard Dinámico ==================
+# Exportar un log detallado de apuestas con datos de usuario para el Top 10 dinámico
+if USUARIOS_FILE.exists():
+    try:
+        # Re-usar el dataframe 'usuarios' ya cargado y limpiado
+        apuestas_con_usuarios = apuestas.merge(
+            usuarios,
+            how="inner",
+            left_on="Documento",
+            right_on="DNI"
+        )
+        # Seleccionar columnas relevantes para no exponer datos innecesarios
+        columnas_exportar = [
+            "Fecha", "Documento", "Usuario", "Correo", "Juego", "Importe"
+        ]
+        apuestas_con_usuarios[columnas_exportar].to_csv(
+            csv_dir / "apuestas_con_usuarios.csv", index=False
+        )
+        print("✅ CSV generado: apuestas_con_usuarios.csv para Top 10 dinámico.")
+    except NameError:
+        print("⚠️  DataFrame 'usuarios' no fue creado, no se puede generar apuestas_con_usuarios.csv.")
+    except Exception as e:
+        print(f"⚠️ Error al generar apuestas_con_usuarios.csv: {e}")
+
+# Exportar apuestas agregadas por día para cálculo de recaudación
+apuestas_diario = (
+    apuestas.groupby(apuestas["Fecha"].dt.date)
+            .agg(Recaudacion=("Importe", "sum"))
+            .reset_index()
+            .rename(columns={"Fecha": "Fecha_Dia"})
+)
+apuestas_diario.to_csv(csv_dir / "apuestas_diario.csv", index=False)
+print("✅ CSV generado: apuestas_diario.csv para KPI de recaudación.")
+
 
 # Nuevo: generar CSV para el total de apuestas por juego y por mes
 try:
