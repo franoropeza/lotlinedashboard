@@ -362,4 +362,8 @@ def actualizar_top10(start, end, juego_seleccionado):
 
 
 if __name__ == "__main__":
-    app.run(debug=True) # Usar debug=True para desarrollo local
+    # Render provides the port to use in an environment variable.
+    # The host must be '0.0.0.0' to be accessible from outside the container.
+    # Debug mode should be False in production.
+    port = int(os.environ.get("PORT", 10000))
+    app.run(debug=False, host="0.0.0.0", port=port)
