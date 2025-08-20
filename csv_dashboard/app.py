@@ -55,7 +55,7 @@ app.index_string = '''
 
 # Configuración de archivos
 FECHA_MODO_FULL = pd.Timestamp("2025-07-07")
-CSV_DIR = "csv_dashboard"
+CSV_DIR = "."
 
 # ==================== Funciones de carga de datos ====================
 def cargar_csv_con_fechas(filename, date_col, dayfirst=False):
