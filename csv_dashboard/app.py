@@ -80,6 +80,8 @@ df_prom = cargar_csv_con_fechas("deposito_promedio.csv", "Fecha_Dia")
 df_jugadores = pd.read_csv(os.path.join(CSV_DIR, "jugadores_unicos_por_juego.csv")) if os.path.exists(os.path.join(CSV_DIR, "jugadores_unicos_por_juego.csv")) else pd.DataFrame()
 df_nuevos = cargar_csv_con_fechas("nuevos_modo.csv", "Fecha_Alta", dayfirst=True)
 df_reactivados = cargar_csv_con_fechas("reactivados_modo.csv", "Fecha", dayfirst=True)
+df_total_juegos_mes = cargar_csv_con_fechas("total_juegos_mes.csv", "AñoMes")
+
 
 # Cargar datos para nuevas funcionalidades
 df_apuestas = cargar_csv_con_fechas("apuestas_diario.csv", "Fecha_Dia")
@@ -164,9 +166,11 @@ tab_main = dbc.Container([
     ]),
 
     # --- GRÁFICOS DINÁMICOS ---
+    dbc.Row([dbc.Col(dcc.Graph(id="grafico_evolucion_juegos"))]),
     dbc.Row([dbc.Col(dcc.Graph(id="grafico_monto"))]),
     dbc.Row([dbc.Col(dcc.Graph(id="grafico_cant"))]),
     dbc.Row([dbc.Col(dcc.Graph(id="grafico_prom"))]),
+    
 
 ], fluid=True)
 
@@ -257,6 +261,7 @@ app.layout = html.Div([
     Output("kpi_monto_modo", "children"),
     Output("kpi_monto_retail", "children"),
     # --- Salidas para Gráficos ---
+    Output("grafico_evolucion_juegos", "figure"),
     Output("grafico_monto", "figure"),
     Output("grafico_cant", "figure"),
     Output("grafico_prom", "figure"),
@@ -299,7 +304,22 @@ def actualizar_dashboard(start, end):
     fig_cant = px.bar(df_cant_filtrado, x="Fecha_Dia", y=["MODO", "Retail"], title="Recargas por día por canal", labels={"value": "Cantidad", "variable": "Canal"})
     fig_prom = px.line(df_prom_filtrado, x="Fecha_Dia", y=["MODO", "Retail"], title="Depósito promedio diario", labels={"value": "$", "variable": "Canal"})
     
-    # --- Devolver todos los valores en el orden correcto ---
+    # --- Lógica para nuevo gráfico de evolución de juegos ---
+    start_month = pd.to_datetime(start).strftime('%Y-%m')
+    end_month = pd.to_datetime(end).strftime('%Y-%m')
+    df_juegos_filtrado = df_total_juegos_mes[
+        (df_total_juegos_mes["AñoMes"] >= start_month) &
+        (df_total_juegos_mes["AñoMes"] <= end_month)
+    ]
+    fig_evolucion_juegos = px.bar(
+        df_juegos_filtrado,
+        x="AñoMes",
+        y="Total_Bets",
+        color="Juego",
+        title="Evolución Mensual de Apuestas por Juego",
+        labels={"AñoMes": "Mes", "Total_Bets": "Cantidad de Apuestas"}
+    )
+
     return (
         f"${promedio_total:,.2f}",
         f"{usuarios_apostadores:,.0f}",
@@ -309,6 +329,7 @@ def actualizar_dashboard(start, end):
         f"{recargas_retail_total:,.0f}",
         f"${monto_modo:,.2f}",
         f"${monto_retail:,.2f}",
+        fig_evolucion_juegos,
         fig_monto,
         fig_cant,
         fig_prom,
