@@ -3,50 +3,31 @@ import plotly.express as px
 from dash import Dash, html, dcc, Input, Output, dash_table
 import dash_bootstrap_components as dbc
 import os
+import numpy as np
 
 # =========================================================================
-# === INSTRUCCIONES PARA COMPARTIR EL DASHBOARD CON EL EQUIPO =============
+# === INSTRUCCIONES PARA DESPLIEGUE =======================================
 # =========================================================================
-# Para compartir este dashboard con tu equipo, sigue estos pasos:
+# 1.  Asegúrate de que tu script `generar_reporte_incremental.py` esté
+#     actualizado para crear todos los CSVs necesarios en la carpeta
+#     `csv_dashboard/`.
 #
-# 1. Asegúrate de tener todos los archivos necesarios en una carpeta:
-#    - Este archivo: `app.py`
-#    - El script para generar los datos: `generar_reporte_incremental.py`
-#    - La carpeta con los datos de origen: `data/`
+# 2.  Ejecuta `generar_reporte_incremental.py` localmente para crear
+#     los archivos de datos.
 #
-# 2. Tu equipo debe instalar las librerías necesarias de Python:
-#    - pandas
-#    - plotly
-#    - dash
-#    - dash-bootstrap-components
-#    Esto se puede hacer con el siguiente comando en la terminal:
-#    pip install pandas plotly dash dash-bootstrap-components
+# 3.  Sube la carpeta `csv_dashboard/` junto con `app.py` a tu
+#     repositorio de Git para que Render pueda acceder a los datos.
 #
-# 3. En tu máquina, ejecuta el script de generación de reportes para
-#    asegurarte de que los archivos CSV estén actualizados:
-#    python generar_reporte_incremental.py
-#
-# 4. En tu máquina, ejecuta este script para iniciar la aplicación web:
-#    python app.py
-#
-# 5. La aplicación se iniciará en un servidor web local, generalmente en
-#    http://127.0.0.1:8050. Comparte esta URL con tu equipo.
-#
-# 6. Para que el equipo pueda acceder a la aplicación, tu máquina debe estar
-#    encendida y la aplicación en ejecución. Si necesitan un acceso más
-#    permanente, la aplicación se puede desplegar en un servidor web
-#    dedicado (como Heroku, PythonAnywhere, etc.), pero esto requiere
-#    una configuración adicional.
+#     NOTA: Para una solución más robusta, los datos deberían estar
+#     en una base de datos externa, no en archivos CSV en el repositorio.
 # =========================================================================
-
 
 # Inicializar app
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
-app.title = "Dashboard Lotería de Salta"
+app.title = "Dashboard de Billeteras"
 server = app.server
 
-# Estilos CSS personalizados para el fondo y padding
-app._assets_folder = os.path.join(os.path.dirname(__file__), 'assets')
+# Estilos CSS personalizados
 app.index_string = '''
 <!DOCTYPE html>
 <html>
@@ -72,17 +53,13 @@ app.index_string = '''
 </html>
 '''
 
-
-# Fecha de hito para el filtro de nuevos usuarios y cálculo de recaudación
+# Configuración de archivos
 FECHA_MODO_FULL = pd.Timestamp("2025-07-07")
-CSV_DIR = "." # Definir la carpeta de los CSV
+CSV_DIR = "csv_dashboard"
 
 # ==================== Funciones de carga de datos ====================
 def cargar_csv_con_fechas(filename, date_col, dayfirst=False):
-    """
-    Carga un archivo CSV y parsea una columna de fecha si existe.
-    Retorna un DataFrame vacío si el archivo no existe.
-    """
+    """Carga un archivo CSV y convierte una columna de fecha si existe."""
     filepath = os.path.join(CSV_DIR, filename)
     if not os.path.exists(filepath):
         print(f"⚠️ Archivo no encontrado: {filepath}")
@@ -97,31 +74,23 @@ def cargar_csv_con_fechas(filename, date_col, dayfirst=False):
         return pd.DataFrame()
 
 # Cargar datasets
-df_modo = cargar_csv_con_fechas("modo_diario.csv", "Fecha_Dia")
 df_monto = cargar_csv_con_fechas("recargas_monto.csv", "Fecha_Dia")
 df_cant = cargar_csv_con_fechas("recargas_cant.csv", "Fecha_Dia")
 df_prom = cargar_csv_con_fechas("deposito_promedio.csv", "Fecha_Dia")
-df_comp = pd.read_csv(os.path.join(CSV_DIR, "comparativa_modo.csv")) if os.path.exists(os.path.join(CSV_DIR, "comparativa_modo.csv")) else pd.DataFrame()
-df_mov_modo = cargar_csv_con_fechas("movimientos_modo.csv", "Fecha", dayfirst=True)
-
-df_kpis = pd.read_csv(os.path.join(CSV_DIR, "kpis.csv")) if os.path.exists(os.path.join(CSV_DIR, "kpis.csv")) else pd.DataFrame()
 df_jugadores = pd.read_csv(os.path.join(CSV_DIR, "jugadores_unicos_por_juego.csv")) if os.path.exists(os.path.join(CSV_DIR, "jugadores_unicos_por_juego.csv")) else pd.DataFrame()
 df_nuevos = cargar_csv_con_fechas("nuevos_modo.csv", "Fecha_Alta", dayfirst=True)
 df_reactivados = cargar_csv_con_fechas("reactivados_modo.csv", "Fecha", dayfirst=True)
-df_total_juegos_mes = cargar_csv_con_fechas("total_juegos_mes.csv", "AñoMes") # AñoMes es un string, no necesita dayfirst
-df_total_usuarios_nuevos_modo = pd.read_csv(os.path.join(CSV_DIR, "total_usuarios_nuevos_modo.csv")) if os.path.exists(os.path.join(CSV_DIR, "total_usuarios_nuevos_modo.csv")) else pd.DataFrame({"Valor":[0]})
 
 # Cargar datos para nuevas funcionalidades
 df_apuestas = cargar_csv_con_fechas("apuestas_diario.csv", "Fecha_Dia")
 df_retencion = pd.read_csv(os.path.join(CSV_DIR, "retencion_cohorts.csv")) if os.path.exists(os.path.join(CSV_DIR, "retencion_cohorts.csv")) else pd.DataFrame()
 df_apuestas_full = cargar_csv_con_fechas("apuestas_con_usuarios.csv", "Fecha")
 
-# Llenar DataFrames vacíos para evitar errores de layout
+# Llenar DataFrames vacíos para evitar errores de layout si faltan archivos
 if df_monto.empty:
     print("⚠️ Faltan datos para generar el dashboard principal.")
     df_monto = pd.DataFrame({"Fecha_Dia": [pd.Timestamp.now()], "MODO": [0], "Retail": [0]})
     df_cant = pd.DataFrame({"Fecha_Dia": [pd.Timestamp.now()], "MODO": [0], "Retail": [0]})
-    df_modo = pd.DataFrame({"Fecha_Dia": [pd.Timestamp.now()], "Usuarios_Unicos": [0]})
     df_prom = pd.DataFrame({"Fecha_Dia": [pd.Timestamp.now()], "MODO": [0], "Retail": [0]})
 
 if df_apuestas.empty:
@@ -134,30 +103,11 @@ fecha_max = df_monto["Fecha_Dia"].max()
 
 # ==================== Layout de la aplicación ====================
 
-# Construir el layout de los KPIs dinámicamente
-kpi_cards = []
-if not df_kpis.empty:
-    for _, row in df_kpis.iterrows():
-        kpi_label = row["KPI"]
-        kpi_value = row["Valor"]
-        
-        # Formatear el valor según el KPI
-        if "%" in kpi_label:
-            formatted_value = f"{kpi_value:,.2f}%"
-        elif "$" in kpi_label:
-            formatted_value = f"${kpi_value:,.2f}"
-        else:
-            formatted_value = f"{kpi_value:,.0f}"
-
-        card = dbc.Col(dbc.Card([
-            dbc.CardHeader(kpi_label),
-            dbc.CardBody(html.H4(formatted_value, className="card-title"))
-        ], color="light", className="mb-4"), width=3)
-        kpi_cards.append(card)
-
 # Tab: KPIs + Gráficos
 tab_main = dbc.Container([
     html.H1("📊 Dashboard de Billeteras", className="text-center my-4"),
+    
+    # --- FILTRO DE FECHA ---
     dbc.Row([
         dbc.Col([
             dcc.DatePickerRange(
@@ -171,38 +121,53 @@ tab_main = dbc.Container([
             )
         ])
     ]),
-    html.H2("KPIs Globales", className="mt-4"),
-    dbc.Row(kpi_cards),
-    
-    html.H2("Análisis del Período Seleccionado", className="mt-5"),
-    dbc.Row([
-        dbc.Col(dbc.Card([
-            dbc.CardHeader(html.H5("Recaudación en Período", className="text-center")),
-            dbc.CardBody(html.H4("$0", id="kpi_recaudacion_periodo", className="card-title text-center"))
-        ], color="warning", outline=True), width=4),
-        dbc.Col(dbc.Card([
-            dbc.CardHeader(html.H5("Nuevos Usuarios (desde MODO)", className="text-center")),
-            dbc.CardBody(html.H4(
-                f"{df_total_usuarios_nuevos_modo['Valor'].iloc[0]:,.0f}", 
-                className="card-title text-center"
-            ))
-        ], color="success", outline=True), width=4),
-        dbc.Col(dbc.Card([
-            dbc.CardHeader(html.H5("Bets Totales por Juego y Mes", className="text-center")),
-            dbc.CardBody(dcc.Graph(
-                id="grafico_totales_juegos_mes",
-                figure=px.bar(
-                    df_total_juegos_mes, x="AñoMes", y="Total_Bets", color="Juego",
-                    title="Total de Apuestas por Juego y Mes",
-                    labels={"Total_Bets": "Total de Apuestas", "AñoMes": "Año-Mes"}
-                )
-            ))
-        ], color="info", outline=True), width=4)
-    ], className="mb-4"),
 
+    # --- KPIs DINÁMICOS (se actualizan con la fecha) ---
+    html.H2("Análisis del Período Seleccionado", className="mt-4"),
+    dbc.Row([
+        # Fila 1 de KPIs dinámicos
+        dbc.Col(dbc.Card([
+            dbc.CardHeader("Promedio depósito $"),
+            dbc.CardBody(html.H4(id="kpi_promedio_deposito", className="card-title"))
+        ], color="light", className="mb-4"), width=3),
+        dbc.Col(dbc.Card([
+            dbc.CardHeader("Usuarios únicos apostadores"),
+            dbc.CardBody(html.H4(id="kpi_usuarios_apostadores", className="card-title"))
+        ], color="light", className="mb-4"), width=3),
+        dbc.Col(dbc.Card([
+            dbc.CardHeader("Usuarios únicos que recargaron"),
+            dbc.CardBody(html.H4(id="kpi_usuarios_recargaron", className="card-title"))
+        ], color="light", className="mb-4"), width=3),
+         dbc.Col(dbc.Card([
+            dbc.CardHeader("Recaudación en Período"),
+            dbc.CardBody(html.H4(id="kpi_recaudacion_periodo", className="card-title"))
+        ], color="warning", outline=True, className="mb-4"), width=3),
+    ]),
+    dbc.Row([
+        # Fila 2 de KPIs dinámicos
+        dbc.Col(dbc.Card([
+            dbc.CardHeader("Recargas - MODO"),
+            dbc.CardBody(html.H4(id="kpi_recargas_modo", className="card-title"))
+        ], color="light", className="mb-4"), width=3),
+        dbc.Col(dbc.Card([
+            dbc.CardHeader("Recargas - Retail"),
+            dbc.CardBody(html.H4(id="kpi_recargas_retail", className="card-title"))
+        ], color="light", className="mb-4"), width=3),
+        dbc.Col(dbc.Card([
+            dbc.CardHeader("Monto MODO $"),
+            dbc.CardBody(html.H4(id="kpi_monto_modo", className="card-title"))
+        ], color="light", className="mb-4"), width=3),
+        dbc.Col(dbc.Card([
+            dbc.CardHeader("Monto Retail $"),
+            dbc.CardBody(html.H4(id="kpi_monto_retail", className="card-title"))
+        ], color="light", className="mb-4"), width=3),
+    ]),
+
+    # --- GRÁFICOS DINÁMICOS ---
     dbc.Row([dbc.Col(dcc.Graph(id="grafico_monto"))]),
     dbc.Row([dbc.Col(dcc.Graph(id="grafico_cant"))]),
     dbc.Row([dbc.Col(dcc.Graph(id="grafico_prom"))]),
+
 ], fluid=True)
 
 
@@ -255,7 +220,7 @@ tab_tablas = dbc.Container([
 
 # Layout final con tabs
 app.layout = html.Div([
-    html.Img(src='/assets/logo.png', style={'display': 'block', 'margin-left': 'auto', 'margin-right': 'auto', 'width': '150px', 'height': '150px', 'margin-top':'20px'}),
+    html.Img(src='assets/logo.png', style={'display': 'block', 'margin-left': 'auto', 'margin-right': 'auto', 'width': '150px', 'height': '150px', 'margin-top':'20px'}),
     dbc.Container([
         dcc.Tabs([
             dcc.Tab(label="📊 Dashboard", children=[tab_main]),
@@ -282,10 +247,20 @@ app.layout = html.Div([
 
 # ==================== Callbacks ====================
 @app.callback(
+    # --- Salidas para KPIs Dinámicos ---
+    Output("kpi_promedio_deposito", "children"),
+    Output("kpi_usuarios_apostadores", "children"),
+    Output("kpi_usuarios_recargaron", "children"),
     Output("kpi_recaudacion_periodo", "children"),
+    Output("kpi_recargas_modo", "children"),
+    Output("kpi_recargas_retail", "children"),
+    Output("kpi_monto_modo", "children"),
+    Output("kpi_monto_retail", "children"),
+    # --- Salidas para Gráficos ---
     Output("grafico_monto", "figure"),
     Output("grafico_cant", "figure"),
     Output("grafico_prom", "figure"),
+    # --- Entradas ---
     Input("filtro_fecha", "start_date"),
     Input("filtro_fecha", "end_date")
 )
@@ -293,25 +268,47 @@ def actualizar_dashboard(start, end):
     start_dt = pd.to_datetime(start)
     end_dt = pd.to_datetime(end)
 
-    # Filtrar dataframes por rango de fecha
+    # Filtrar todos los dataframes necesarios por el rango de fecha
     df_monto_filtrado = df_monto[(df_monto["Fecha_Dia"] >= start_dt) & (df_monto["Fecha_Dia"] <= end_dt)]
     df_cant_filtrado = df_cant[(df_cant["Fecha_Dia"] >= start_dt) & (df_cant["Fecha_Dia"] <= end_dt)]
     df_prom_filtrado = df_prom[(df_prom["Fecha_Dia"] >= start_dt) & (df_prom["Fecha_Dia"] <= end_dt)]
     df_apuestas_filtrado = df_apuestas[(df_apuestas["Fecha_Dia"] >= start_dt) & (df_apuestas["Fecha_Dia"] <= end_dt)]
-    
-    # Calcular recaudación para el período seleccionado
-    recaudacion_periodo = df_apuestas_filtrado["Recaudacion"].sum() if not df_apuestas_filtrado.empty else 0
+    df_apostadores_filtrado = df_apuestas_full[(df_apuestas_full["Fecha"] >= start_dt) & (df_apuestas_full["Fecha"] <= end_dt)]
 
-    # Generar figuras de gráficos
-    fig_monto = px.line(df_monto_filtrado, x="Fecha_Dia", y=["MODO", "Retail"],
-                        title="$ por día por canal", labels={"value": "$", "variable": "Canal"})
-    fig_cant = px.bar(df_cant_filtrado, x="Fecha_Dia", y=["MODO", "Retail"],
-                      title="Recargas por día por canal", labels={"value": "Cantidad", "variable": "Canal"})
-    fig_prom = px.line(df_prom_filtrado, x="Fecha_Dia", y=["MODO", "Retail"],
-                       title="Depósito promedio diario – MODO vs Retail", labels={"value": "$", "variable": "Canal"})
+    # --- Calcular los valores para los KPIs dinámicos ---
+    promedio_deposito_modo = np.nanmean(df_prom_filtrado["MODO"]) if "MODO" in df_prom_filtrado and not df_prom_filtrado["MODO"].empty else 0
+    promedio_deposito_retail = np.nanmean(df_prom_filtrado["Retail"]) if "Retail" in df_prom_filtrado and not df_prom_filtrado["Retail"].empty else 0
+    total_depositos = df_cant_filtrado['MODO'].sum() + df_cant_filtrado['Retail'].sum()
+    total_monto = df_monto_filtrado['MODO'].sum() + df_monto_filtrado['Retail'].sum()
+    promedio_total = total_monto / total_depositos if total_depositos > 0 else 0
+
+    usuarios_apostadores = df_apostadores_filtrado["Documento"].nunique()
+    recargas_modo_total = df_cant_filtrado["MODO"].sum()
+    recargas_retail_total = df_cant_filtrado["Retail"].sum()
     
+    # Un cálculo más preciso para usuarios únicos que recargaron requeriría un log detallado de cargas.
+    # Aquí sumamos las recargas de ambos canales como proxy.
+    usuarios_recargaron = recargas_modo_total + recargas_retail_total
+
+    recaudacion_periodo = df_apuestas_filtrado["Recaudacion"].sum()
+    monto_modo = df_monto_filtrado["MODO"].sum()
+    monto_retail = df_monto_filtrado["Retail"].sum()
+
+    # --- Generar figuras de gráficos ---
+    fig_monto = px.line(df_monto_filtrado, x="Fecha_Dia", y=["MODO", "Retail"], title="$ por día por canal", labels={"value": "$", "variable": "Canal"})
+    fig_cant = px.bar(df_cant_filtrado, x="Fecha_Dia", y=["MODO", "Retail"], title="Recargas por día por canal", labels={"value": "Cantidad", "variable": "Canal"})
+    fig_prom = px.line(df_prom_filtrado, x="Fecha_Dia", y=["MODO", "Retail"], title="Depósito promedio diario", labels={"value": "$", "variable": "Canal"})
+    
+    # --- Devolver todos los valores en el orden correcto ---
     return (
+        f"${promedio_total:,.2f}",
+        f"{usuarios_apostadores:,.0f}",
+        f"{int(usuarios_recargaron):,.0f}",
         f"${recaudacion_periodo:,.2f}",
+        f"{recargas_modo_total:,.0f}",
+        f"{recargas_retail_total:,.0f}",
+        f"${monto_modo:,.2f}",
+        f"${monto_retail:,.2f}",
         fig_monto,
         fig_cant,
         fig_prom,
@@ -332,7 +329,6 @@ def actualizar_top10(start, end, juego_seleccionado):
     start_dt = pd.to_datetime(start)
     end_dt = pd.to_datetime(end)
     
-    # 1. Filtrar por fecha y juego
     mask = (
         (df_apuestas_full["Fecha"] >= start_dt) &
         (df_apuestas_full["Fecha"] <= end_dt) &
@@ -343,16 +339,12 @@ def actualizar_top10(start, end, juego_seleccionado):
     if df_filtrado.empty:
         return [], []
 
-    # 2. Agrupar y agregar para obtener los totales
     top_users = df_filtrado.groupby(["Documento", "Usuario", "Correo"]).agg(
         Total_Gastado=("Importe", "sum"),
         Total_Apuestas=("Importe", "count")
     ).reset_index()
 
-    # 3. Ordenar y tomar el top 10
     top_users = top_users.sort_values("Total_Gastado", ascending=False).head(10)
-    
-    # Formatear columnas para la tabla
     top_users["Total_Gastado"] = top_users["Total_Gastado"].map('${:,.2f}'.format)
     
     columns = [{"name": c, "id": c} for c in top_users.columns]
@@ -360,10 +352,7 @@ def actualizar_top10(start, end, juego_seleccionado):
     
     return columns, data
 
-
 if __name__ == "__main__":
-    # Render provides the port to use in an environment variable.
-    # The host must be '0.0.0.0' to be accessible from outside the container.
-    # Debug mode should be False in production.
+    # Configuración para despliegue en Render
     port = int(os.environ.get("PORT", 10000))
     app.run(debug=False, host="0.0.0.0", port=port)
