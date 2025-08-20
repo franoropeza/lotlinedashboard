@@ -605,44 +605,110 @@ if USUARIOS_FILE.exists():
     except Exception as e:
         print(f"⚠️ Error al calcular KPIs de actividad de usuarios: {e}")
 
-# ========= Análisis de Retención de Nuevos Usuarios (para Upgrade 2 Dashboard) =========
-try:
-    # 1. Fecha del primer movimiento de cada usuario
-    primer_mov = data.groupby("Documento")["Fecha"].min().reset_index()
-    primer_mov.rename(columns={"Fecha": "Fecha_Primer_Mov"}, inplace=True)
-    primer_mov["Cohorte_Mes"] = primer_mov["Fecha_Primer_Mov"].dt.to_period("M")
+# ========= Carga de datos de usuarios (con FIX para Fecha_Alta) =========
+usuarios = pd.DataFrame() # Inicializar como DataFrame vacío
+if USUARIOS_FILE.exists():
+    try:
+        usuarios_raw = pd.read_excel(USUARIOS_FILE)
+        usuarios_raw.columns = [str(c).strip() for c in usuarios_raw.columns]
+        
+        # --- FIX INTELIGENTE PARA 'Fecha_Alta' ---
+        fecha_alta_col = None
+        for col in usuarios_raw.columns:
+            norm_col = normalizar(col)
+            if 'fecha' in norm_col and 'alta' in norm_col:
+                fecha_alta_col = col
+                break
+        
+        if fecha_alta_col:
+            usuarios_raw.rename(columns={fecha_alta_col: "Fecha_Alta"}, inplace=True)
+            usuarios_raw["Fecha_Alta"] = pd.to_datetime(usuarios_raw["Fecha_Alta"], dayfirst=True, errors="coerce")
+        else:
+            print("⚠️ ADVERTENCIA: No se encontró una columna 'Fecha_Alta' en el archivo de usuarios. El análisis de retención no funcionará.")
 
-    # 2. Fecha de la primera apuesta de cada usuario
-    primer_apuesta = apuestas.groupby("Documento")["Fecha"].min().reset_index()
-    primer_apuesta.rename(columns={"Fecha": "Fecha_Primera_Apuesta"}, inplace=True)
+        # --- FIX INTELIGENTE PARA 'DNI' / 'Documento' ---
+        dni_col = None
+        if "DNI" in usuarios_raw.columns:
+            dni_col = "DNI"
+        elif "Documento" in usuarios_raw.columns:
+            dni_col = "Documento"
+        else:
+            for col in usuarios_raw.columns:
+                norm_col = normalizar(col)
+                if 'dni' in norm_col or 'documento' in norm_col:
+                    dni_col = col
+                    break
+        
+        if dni_col:
+            usuarios_raw.rename(columns={dni_col: "DNI"}, inplace=True)
+            usuarios_raw["DNI"] = pd.to_numeric(usuarios_raw["DNI"], errors="coerce")
+            usuarios = usuarios_raw.dropna(subset=["DNI"]).drop_duplicates(subset="DNI", keep="last").copy()
+            print("✅ Archivo de usuarios cargado y procesado.")
+        else:
+            print("⚠️ ADVERTENCIA: No se encontró una columna 'DNI' o 'Documento' en el archivo de usuarios.")
 
-    # 3. Unir los datos
-    retencion_df = pd.merge(primer_mov, primer_apuesta, on="Documento", how="left")
+    except Exception as e:
+        print(f"⚠️ No se pudo procesar el archivo de usuarios: {e}")
+        
+# ========= Análisis de Retención de Nuevos Usuarios (UPGRADED) =========
+print("🔄 Calculando análisis de retención de usuarios mejorado...")
+if not usuarios.empty and "Fecha_Alta" in usuarios.columns:
+    try:
+        # 1. Obtener la fecha de alta de cada usuario
+        df_base_usuarios = usuarios[["DNI", "Fecha_Alta"]].copy()
+        df_base_usuarios.rename(columns={"DNI": "Documento"}, inplace=True)
+        df_base_usuarios["Cohorte_Mes"] = df_base_usuarios["Fecha_Alta"].dt.to_period("M")
 
-    # 4. Calcular días hasta la primera apuesta
-    retencion_df["Dias_Hasta_Apuesta"] = (retencion_df["Fecha_Primera_Apuesta"] - retencion_df["Fecha_Primer_Mov"]).dt.days
+        # 2. Encontrar la fecha de la primera apuesta de cada usuario
+        primera_apuesta = apuestas.groupby("Documento")["Fecha"].min().reset_index()
+        primera_apuesta.rename(columns={"Fecha": "Fecha_Primera_Apuesta"}, inplace=True)
+        
+        # 3. Unir la fecha de alta con la primera apuesta
+        df_funnel = pd.merge(df_base_usuarios, primera_apuesta, on="Documento", how="left")
+        df_funnel.dropna(subset=["Fecha_Primera_Apuesta"], inplace=True) # Solo usuarios que han apostado al menos una vez
 
-    # 5. Marcar si apostaron en los primeros 7 y 30 días
-    retencion_df["Aposto_7_Dias"] = retencion_df["Dias_Hasta_Apuesta"] <= 7
-    retencion_df["Aposto_30_Dias"] = retencion_df["Dias_Hasta_Apuesta"] <= 30
+        # 4. Encontrar la primera recarga DESPUÉS de la primera apuesta
+        cargas_posteriores = pd.merge(cargas, df_funnel[['Documento', 'Fecha_Primera_Apuesta']], on="Documento")
+        cargas_posteriores = cargas_posteriores[cargas_posteriores["Fecha"] > cargas_posteriores["Fecha_Primera_Apuesta"]]
+        primera_recarga_posterior = cargas_posteriores.groupby("Documento")["Fecha"].min().reset_index()
+        primera_recarga_posterior.rename(columns={"Fecha": "Fecha_Recarga_Posterior"}, inplace=True)
 
-    # 6. Agregar por cohorte
-    cohort_summary = retencion_df.groupby("Cohorte_Mes").agg(
-        Total_Nuevos_Usuarios=("Documento", "count"),
-        Retenidos_7_Dias=("Aposto_7_Dias", "sum"),
-        Retenidos_30_Dias=("Aposto_30_Dias", "sum")
-    ).reset_index()
+        # 5. Encontrar la primera apuesta DESPUÉS de la primera apuesta (es decir, la segunda apuesta)
+        apuestas_posteriores = pd.merge(apuestas, df_funnel[['Documento', 'Fecha_Primera_Apuesta']], on="Documento")
+        apuestas_posteriores = apuestas_posteriores[apuestas_posteriores["Fecha"] > apuestas_posteriores["Fecha_Primera_Apuesta"]]
+        segunda_apuesta = apuestas_posteriores.groupby("Documento")["Fecha"].min().reset_index()
+        segunda_apuesta.rename(columns={"Fecha": "Fecha_Segunda_Apuesta"}, inplace=True)
 
-    # 7. Calcular tasas de retención
-    cohort_summary["Tasa_Retencion_7_Dias"] = (cohort_summary["Retenidos_7_Dias"] / cohort_summary["Total_Nuevos_Usuarios"]) * 100
-    cohort_summary["Tasa_Retencion_30_Dias"] = (cohort_summary["Retenidos_30_Dias"] / cohort_summary["Total_Nuevos_Usuarios"]) * 100
-    
-    cohort_summary["Cohorte_Mes"] = cohort_summary["Cohorte_Mes"].astype(str)
-    cohort_summary.to_csv(csv_dir / "retencion_cohorts.csv", index=False)
-    print("✅ CSV generado: retencion_cohorts.csv para análisis de retención.")
+        # 6. Marcar usuarios retenidos: aquellos que recargaron Y volvieron a apostar
+        df_funnel = pd.merge(df_funnel, primera_recarga_posterior, on="Documento", how="left")
+        df_funnel = pd.merge(df_funnel, segunda_apuesta, on="Documento", how="left")
+        df_funnel["Retenido"] = ~df_funnel["Fecha_Recarga_Posterior"].isna() & ~df_funnel["Fecha_Segunda_Apuesta"].isna()
 
-except Exception as e:
-    print(f"⚠️ Error al generar el análisis de retención: {e}")
+        # 7. Calcular el resumen por cohorte
+        cohort_summary = df_funnel.groupby("Cohorte_Mes").agg(
+            Total_Nuevos_Usuarios=("Documento", "nunique"),
+            Retenidos=("Retenido", "sum")
+        ).reset_index()
+        
+        # Renombrar columnas para compatibilidad con el dashboard existente
+        cohort_summary.rename(columns={
+            "Retenidos": "Retenidos_30_Dias",
+        }, inplace=True)
+
+        cohort_summary["Tasa_Retencion_30_Dias"] = (cohort_summary["Retenidos_30_Dias"] / cohort_summary["Total_Nuevos_Usuarios"]) * 100
+        # Añadimos una columna dummy para la de 7 días para no romper el gráfico
+        cohort_summary["Tasa_Retencion_7_Dias"] = np.nan 
+
+        cohort_summary["Cohorte_Mes"] = cohort_summary["Cohorte_Mes"].astype(str)
+        cohort_summary.to_csv(csv_dir / "retencion_cohorts.csv", index=False)
+        print("✅ CSV generado: retencion_cohorts.csv con lógica de retención mejorada.")
+
+    except Exception as e:
+        print(f"⚠️ Error al generar el análisis de retención mejorado: {e}")
+else:
+    print("ℹ️  Saltando análisis de retención porque los datos de usuarios no están disponibles o no tienen 'Fecha_Alta'.")
+
+
 
 
 # ================== Exportar datos para Dashboard Dinámico ==================
