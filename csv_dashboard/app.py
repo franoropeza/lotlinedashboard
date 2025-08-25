@@ -37,7 +37,7 @@ app.index_string = '''
         {%favicon%}
         {%css%}
         <style>
-            h1, h2, h3, h4, h5, p, label {
+            h1, h2, h3, h5, p, label {
                 color: white;
             }
         </style>
@@ -457,14 +457,28 @@ def actualizar_tab_bonos(start, end):
     )
 
     # Barras por tipo
-    if not diario.empty:
-        melted = diario.melt(
-            id_vars=["Fecha_Dia"],
-            value_vars=["Registro_Cant","Deposito_Cant"],
-            var_name="Tipo", value_name="Cantidad"
-        )
-    else:
-        melted = diario
+        # --- Gráfico por tipo (con melt pero seguro) ---
+    for col in ["Registro_Cant", "Deposito_Cant"]:
+        if col not in diario.columns:
+            diario[col] = 0
+
+    melted = diario.melt(
+        id_vars=["Fecha_Dia"],
+        value_vars=["Registro_Cant","Deposito_Cant"],
+        var_name="Tipo", value_name="Cantidad"
+    )
+    melted["Tipo"] = melted["Tipo"].replace({
+        "Registro_Cant": "Registro",
+        "Deposito_Cant": "Depósito"
+    })
+    melted["Cantidad"] = pd.to_numeric(melted["Cantidad"], errors="coerce").fillna(0)
+
+    fig_tipo = px.bar(
+        melted, x="Fecha_Dia", y="Cantidad", color="Tipo",
+        title="Bonos por tipo (registro vs depósito)"
+    )
+    fig_tipo.update_layout(barmode="stack")
+
 
     fig_tipo = px.bar(
         melted, x="Fecha_Dia", y="Cantidad", color="Tipo",
