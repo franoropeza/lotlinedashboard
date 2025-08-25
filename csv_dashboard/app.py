@@ -102,6 +102,19 @@ if df_apuestas.empty:
 fecha_min = df_monto["Fecha_Dia"].min()
 fecha_max = df_monto["Fecha_Dia"].max()
 
+# === Bonificaciones (nuevos CSVs) ===
+df_bonos_kpis   = cargar_csv_con_fechas("kpis_bonificaciones.csv", "Fecha_Dia", dayfirst=True)
+df_bonos_diario = cargar_csv_con_fechas("bonos_diario.csv", "Fecha_Dia", dayfirst=True)
+df_bonos_detalle = cargar_csv_con_fechas("bonos_resumen.csv", "Fecha_Bono", dayfirst=True)
+
+# Cols mínimas esperadas; si faltan, crear dataframes vacíos compatibles
+for name, df, cols in [
+    ("df_bonos_kpis", df_bonos_kpis, ["Fecha_Dia","Bonos_Otorgados","Monto_Bonos","Jugaron_PostBono","Agotaron_Bono","Recargaron_Luego","Registro_Cant","Deposito_Cant"]),
+    ("df_bonos_diario", df_bonos_diario, ["Fecha_Dia","Bonos_Otorgados","Monto_Bonos","Registro_Cant","Deposito_Cant"]),
+]:
+    if df.empty:
+        locals()[name] = pd.DataFrame([{c: (pd.Timestamp.now().date() if "Fecha" in c else 0)} for c in cols]).T.reset_index()
+        locals()[name].columns = cols
 
 # ==================== Layout de la aplicación ====================
 
@@ -229,22 +242,37 @@ app.layout = html.Div([
         dcc.Tabs([
             dcc.Tab(label="📊 Dashboard", children=[tab_main]),
             dcc.Tab(label="📋 Tablas de usuarios", children=[tab_tablas]),
-            dcc.Tab(label="📈 Retención de Usuarios", children=[
-                dbc.Container([
-                    html.H2("Análisis de Retención de Nuevos Usuarios", className="mt-4"),
-                    html.P("Este gráfico muestra el % de usuarios nuevos de cada mes que realizaron su primera apuesta dentro de los 7 y 30 días de su primer movimiento."),
-                    dcc.Graph(
-                        figure=px.bar(
-                            df_retencion,
-                            x="Cohorte_Mes",
-                            y=["Tasa_Retencion_7_Dias", "Tasa_Retencion_30_Dias"],
-                            title="Tasa de Retención de Nuevos Usuarios por Cohorte Mensual",
-                            labels={"Cohorte_Mes": "Mes de Adquisición", "value": "Tasa de Retención (%)"},
-                            barmode='group'
-                        )
-                    )
-                ], fluid=True)
-            ]),
+            dcc.Tab(label="🎁 Datos de Bonificaciones", children=[
+    dbc.Container([
+        html.H2("Datos de Bonificaciones", className="mt-4"),
+        html.P("Evolución diaria de bonos y comportamiento posterior de los usuarios bonificados."),
+
+        # KPIs
+        dbc.Row([
+            dbc.Col(dbc.Card([dbc.CardHeader("Bonos otorgados"), dbc.CardBody(html.H4(id="kpi_bonos_otorgados"))], color="light"), md=2),
+            dbc.Col(dbc.Card([dbc.CardHeader("Monto en bonos $"), dbc.CardBody(html.H4(id="kpi_monto_bonos"))], color="light"), md=2),
+            dbc.Col(dbc.Card([dbc.CardHeader("% que jugaron"), dbc.CardBody(html.H4(id="kpi_pct_jugaron"))], color="light"), md=2),
+            dbc.Col(dbc.Card([dbc.CardHeader("% que agotaron"), dbc.CardBody(html.H4(id="kpi_pct_agotaron"))], color="light"), md=2),
+            dbc.Col(dbc.Card([dbc.CardHeader("% que recargaron"), dbc.CardBody(html.H4(id="kpi_pct_recargaron"))], color="light"), md=2),
+        ], className="my-3"),
+
+        # Gráficos
+        dbc.Row([dbc.Col(dcc.Graph(id="graf_bonos_evolucion"))]),
+        dbc.Row([dbc.Col(dcc.Graph(id="graf_bonos_tipo"))]),
+        dbc.Row([dbc.Col(dcc.Graph(id="graf_bonos_funnel"))]),
+
+        # Detalle (tabla)
+        html.H4("Detalle de bonificaciones (filtrado por fecha)"),
+        dash_table.DataTable(
+            id="tabla_bonos_detalle",
+            columns=[{"name": c, "id": c} for c in (df_bonos_detalle.columns if not df_bonos_detalle.empty else ["DNI_NORM","Email","Fecha_Bono","Monto_Bono","Tipo_Bono","Hizo_Jugada_PostBono","Fecha_Primera_Jugada","Fecha_Agote_Bono","Recargo_despues_Agote"])],
+            data=[],
+            page_size=10,
+            style_table={"overflowX":"auto"}
+        )
+    ], fluid=True)
+]),
+
         ])
     ], fluid=True, style={'padding': '20px'})
 ])
@@ -372,6 +400,73 @@ def actualizar_top10(start, end, juego_seleccionado):
     data = top_users.to_dict("records")
     
     return columns, data
+from dash.dependencies import Input, Output
+import plotly.express as px
+
+@app.callback(
+    Output("kpi_bonos_otorgados", "children"),
+    Output("kpi_monto_bonos", "children"),
+    Output("kpi_pct_jugaron", "children"),
+    Output("kpi_pct_agotaron", "children"),
+    Output("kpi_pct_recargaron", "children"),
+    Output("graf_bonos_evolucion", "figure"),
+    Output("graf_bonos_tipo", "figure"),
+    Output("graf_bonos_funnel", "figure"),
+    Output("tabla_bonos_detalle", "data"),
+    Input("filtro_fecha", "start_date"),
+    Input("filtro_fecha", "end_date"),
+)
+def actualizar_tab_bonos(start, end):
+    if start is None or end is None:
+        return ["0","$0","0%","0%","0%", px.line(), px.bar(), px.bar(), []]
+    s, e = pd.to_datetime(start), pd.to_datetime(end)
+
+    # Filtrar series diarias
+    kpis = df_bonos_kpis[(df_bonos_kpis["Fecha_Dia"] >= s.date()) & (df_bonos_kpis["Fecha_Dia"] <= e.date())].copy()
+    diario = df_bonos_diario[(df_bonos_diario["Fecha_Dia"] >= s.date()) & (df_bonos_diario["Fecha_Dia"] <= e.date())].copy()
+
+    # Totales del período
+    bonos_tot = int(kpis["Bonos_Otorgados"].sum()) if not kpis.empty else 0
+    monto_tot = float(kpis["Monto_Bonos"].sum()) if not kpis.empty else 0.0
+    jugaron   = int(kpis["Jugaron_PostBono"].sum()) if not kpis.empty else 0
+    agotaron  = int(kpis["Agotaron_Bono"].sum()) if not kpis.empty else 0
+    recargaron = int(kpis["Recargaron_Luego"].sum()) if not kpis.empty else 0
+
+    pct = lambda x: (x/bonos_tot*100) if bonos_tot > 0 else 0.0
+    kpi_bonos_ot = f"{bonos_tot:,}"
+    kpi_monto_bonos = f"${monto_tot:,.2f}"
+    kpi_pct_jug = f"{pct(jugaron):.1f}%"
+    kpi_pct_agot = f"{pct(agotaron):.1f}%"
+    kpi_pct_rec = f"{pct(recargaron):.1f}%"
+
+    # Gráfico 1: evolución (líneas $ y barras #)
+    fig_evo = px.line(
+        diario, x="Fecha_Dia", y="Monto_Bonos",
+        title="Monto total de bonos por día", labels={"Monto_Bonos":"$"}
+    )
+    # (opcional) segunda serie con barras de cantidad
+    fig_tipo = px.bar(
+        diario.melt(id_vars=["Fecha_Dia"], value_vars=["Registro_Cant","Deposito_Cant"], var_name="Tipo", value_name="Cantidad"),
+        x="Fecha_Dia", y="Cantidad", color="Tipo",
+        title="Bonos por tipo (registro vs depósito)"
+    )
+
+    # Gráfico 3: funnel comportamiento (% sobre totales del período)
+    df_funnel = pd.DataFrame({
+        "Etapa": ["Jugaron tras bono","Agotaron el bono","Recargaron después"],
+        "Porcentaje": [pct(jugaron), pct(agotaron), pct(recargaron)]
+    })
+    fig_funnel = px.bar(df_funnel, x="Etapa", y="Porcentaje", title="Comportamiento posterior (%)")
+
+    # Detalle de bonos filtrado por rango
+    det = df_bonos_detalle.copy()
+    if not det.empty:
+        det = det[(pd.to_datetime(det["Fecha_Bono"]) >= s) & (pd.to_datetime(det["Fecha_Bono"]) <= e)]
+    data_table = det.to_dict("records")
+
+    return (kpi_bonos_ot, kpi_monto_bonos, kpi_pct_jug, kpi_pct_agot, kpi_pct_rec,
+            fig_evo, fig_tipo, fig_funnel, data_table)
+
 
 if __name__ == "__main__":
     # Configuración para despliegue en Render
