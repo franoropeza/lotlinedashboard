@@ -419,11 +419,22 @@ import plotly.express as px
 def actualizar_tab_bonos(start, end):
     if start is None or end is None:
         return ["0","$0","0%","0%","0%", px.line(), px.bar(), px.bar(), []]
-    s, e = pd.to_datetime(start), pd.to_datetime(end)
 
-    # Filtrar series diarias
-    kpis = df_bonos_kpis[(df_bonos_kpis["Fecha_Dia"] >= s.date()) & (df_bonos_kpis["Fecha_Dia"] <= e.date())].copy()
-    diario = df_bonos_diario[(df_bonos_diario["Fecha_Dia"] >= s.date()) & (df_bonos_diario["Fecha_Dia"] <= e.date())].copy()
+    # ► Comparar siempre Timestamp vs Timestamp (nada de .date())
+    s = pd.to_datetime(start, errors="coerce").normalize()
+    e = pd.to_datetime(end, errors="coerce").normalize()
+
+    # Asegurar que las columnas de fecha sean datetime64[ns] y normalizadas
+    for df, col in [
+        (df_bonos_kpis,   "Fecha_Dia"),
+        (df_bonos_diario, "Fecha_Dia"),
+    ]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce").dt.normalize()
+
+    # Filtrar series diarias (Timestamp vs Timestamp)
+    kpis = df_bonos_kpis[(df_bonos_kpis["Fecha_Dia"] >= s) & (df_bonos_kpis["Fecha_Dia"] <= e)].copy()
+    diario = df_bonos_diario[(df_bonos_diario["Fecha_Dia"] >= s) & (df_bonos_diario["Fecha_Dia"] <= e)].copy()
 
     # Totales del período
     bonos_tot = int(kpis["Bonos_Otorgados"].sum()) if not kpis.empty else 0
@@ -444,28 +455,42 @@ def actualizar_tab_bonos(start, end):
         diario, x="Fecha_Dia", y="Monto_Bonos",
         title="Monto total de bonos por día", labels={"Monto_Bonos":"$"}
     )
-    # (opcional) segunda serie con barras de cantidad
+
+    # Barras por tipo
+    if not diario.empty:
+        melted = diario.melt(
+            id_vars=["Fecha_Dia"],
+            value_vars=["Registro_Cant","Deposito_Cant"],
+            var_name="Tipo", value_name="Cantidad"
+        )
+    else:
+        melted = diario
+
     fig_tipo = px.bar(
-        diario.melt(id_vars=["Fecha_Dia"], value_vars=["Registro_Cant","Deposito_Cant"], var_name="Tipo", value_name="Cantidad"),
-        x="Fecha_Dia", y="Cantidad", color="Tipo",
+        melted, x="Fecha_Dia", y="Cantidad", color="Tipo",
         title="Bonos por tipo (registro vs depósito)"
     )
 
-    # Gráfico 3: funnel comportamiento (% sobre totales del período)
+    # Funnel comportamiento
     df_funnel = pd.DataFrame({
         "Etapa": ["Jugaron tras bono","Agotaron el bono","Recargaron después"],
         "Porcentaje": [pct(jugaron), pct(agotaron), pct(recargaron)]
     })
     fig_funnel = px.bar(df_funnel, x="Etapa", y="Porcentaje", title="Comportamiento posterior (%)")
 
-    # Detalle de bonos filtrado por rango
+    # Detalle (siempre Timestamp en la comparación)
     det = df_bonos_detalle.copy()
     if not det.empty:
-        det = det[(pd.to_datetime(det["Fecha_Bono"]) >= s) & (pd.to_datetime(det["Fecha_Bono"]) <= e)]
+        # Asegurar parse de la fecha del detalle (usa Fecha_Bono u otra)
+        col_fecha_det = "Fecha_Bono" if "Fecha_Bono" in det.columns else "Fecha"
+        det[col_fecha_det] = pd.to_datetime(det[col_fecha_det], errors="coerce").dt.normalize()
+        det = det[(det[col_fecha_det] >= s) & (det[col_fecha_det] <= e)]
+
     data_table = det.to_dict("records")
 
     return (kpi_bonos_ot, kpi_monto_bonos, kpi_pct_jug, kpi_pct_agot, kpi_pct_rec,
             fig_evo, fig_tipo, fig_funnel, data_table)
+
 
 
 if __name__ == "__main__":
