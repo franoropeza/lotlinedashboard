@@ -80,9 +80,29 @@ def leer_movimientos(archivo: Path) -> pd.DataFrame | None:
     )
     return df
 
-def clasificar_canal(movimiento: str) -> str:
-    """Clasifica un movimiento como MODO o Retail."""
-    return "MODO" if "modo" in normalizar(movimiento) else "Retail"
+def clasificar_canal(movimiento: str, tipo_mov: str = "") -> str:
+    """
+    Clasifica un movimiento como MODO, Retail (TJ/Agencia) u Otro.
+    Se apoya tanto en 'Movimiento' como en 'Tipo Mov.'.
+    """
+    mov_norm = normalizar(movimiento)
+    tipo_norm = normalizar(tipo_mov)
+
+    # Detectar MODO
+    if "modo" in mov_norm or "modo" in tipo_norm:
+        return "MODO"
+
+    # Detectar Tarjeta/TJ (se mapea como Retail porque así espera el dashboard)
+    if "tj" in mov_norm or "tarjeta" in mov_norm or "tj" in tipo_norm or "tarjeta" in tipo_norm:
+        return "Retail"
+
+    # Detectar Agencia/POS/Caja → también Retail
+    if any(k in mov_norm for k in ["agencia", "pos", "caja"]):
+        return "Retail"
+
+    # Fallback
+    return "Otro"
+
 
 def get_mtime(p: Path) -> int:
     """Obtiene el tiempo de última modificación de un archivo."""
@@ -210,21 +230,35 @@ for sheet, pattern in GAME_PATTERNS.items():
     game_summaries[sheet] = summary
 
 # ========= RECARGAS / RETIROS / PREMIOS =========
-mask_carga = data["Tipo Mov."].str.contains(
-    r"carga|dep(?:o|ó)sito", case=False, regex=True, na=False
-)
-cargas = data.loc[mask_carga].copy()
-cargas["Canal"]     = cargas["Movimiento"].apply(clasificar_canal)
-cargas["Metodo"]    = np.where(cargas["Canal"]=="MODO", "MODO", "Retail")
-cargas["Fecha_Dia"] = cargas["Fecha"].dt.date
-cargas["Hora"]      = cargas["Fecha"].dt.hour
+# Tomamos SOLO verdaderas cargas de saldo desde MODO o TJ (no "depósitos" genéricos ni bonificaciones)
 
+# Normalizar textos (asume que ya definiste normalizar(); si no, avisá y te lo agrego)
+tm_norm = data["Tipo Mov."].apply(normalizar)
+
+# Filtra "Carga saldo desde MODO/TJ" (soporta variantes de espacios)
+mask_carga = tm_norm.str.match(r"^carga\s+saldo\s+desde\s*(?:modo|tj)\b", na=False)
+
+cargas = data.loc[mask_carga].copy()
+
+# Canal leyendo Movimiento y Tipo Mov. (TJ -> Retail, MODO -> MODO)
+cargas["Canal"] = cargas.apply(
+    lambda r: clasificar_canal(r.get("Movimiento", ""), r.get("Tipo Mov.", "")),
+    axis=1
+)
+
+# Metodo: lo que espera tu dashboard (todo lo que no sea MODO va como Retail)
+cargas["Metodo"] = np.where(cargas["Canal"] == "MODO", "MODO", "Retail")
+
+# Derivados de fecha/hora
+cargas["Fecha_Dia"] = pd.to_datetime(cargas["Fecha"], errors="coerce").dt.date
+cargas["Hora"] = pd.to_datetime(cargas["Fecha"], errors="coerce").dt.hour
+
+# Agregación diaria por canal
 recargas_diario_canal = (
-    cargas.groupby(["Fecha_Dia", "Canal"])
+    cargas.groupby(["Fecha_Dia", "Canal"], as_index=False)
           .agg(Recargas=("Importe", "count"),
                Monto=("Importe", "sum"),
                Usuarios_Unicos=("Documento", "nunique"))
-          .reset_index()
 )
 
 recargas_dia_monto = (
